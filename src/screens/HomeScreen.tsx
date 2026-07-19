@@ -21,12 +21,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 20, gap: 16 },
   streakCard: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
     borderRadius: 16,
     padding: 20,
   },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
-  streakValue: { color: '#FFFFFF', fontSize: 32, fontWeight: '700', marginTop: 4 },
+  streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
 });

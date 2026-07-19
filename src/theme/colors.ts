@@ -1,7 +1,13 @@
-// Placeholder accent — Jay to choose the real brand color(s) before launch.
+// Jay's direction (July 20, 2026): reads "coach app," sport-agnostic (not
+// tied to basketball for future-sport expansion), Olympic-inspired,
+// upbeat/energetic. Deep blue = coach/trust chrome; gold = energy accent
+// on the streak/highlight elements. Replaces the earlier basketball-orange
+// placeholder.
 export const colors = {
-  accent: '#F76B1C',
-  accentDark: '#D9560F',
+  primary: '#1E5AA8',
+  primaryDark: '#153F79',
+  accent: '#F2A93B',
+  accentDark: '#D6900F',
   background: '#FFFFFF',
   surface: '#F7F7F8',
   text: '#111114',
