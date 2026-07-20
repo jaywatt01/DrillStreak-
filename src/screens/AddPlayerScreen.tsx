@@ -91,15 +91,16 @@ export default function AddPlayerScreen() {
   };
 
   const handleAddDrill = async () => {
-    if (!drillName.trim()) return;
+    if (!drillName.trim() || !selectedPlayerId) return;
     setAddingDrill(true);
     setDrillError(null);
     setDrillSuccess(null);
     try {
-      const drill = await addCustomDrill(drillName.trim(), drillCategory.trim());
+      const drill = await addCustomDrill(drillName.trim(), drillCategory.trim(), selectedPlayerId);
       setDrillName('');
       setDrillCategory('');
-      setDrillSuccess(`Added "${drill.name}" to your drill library.`);
+      const playerName = players.find((p) => p.id === selectedPlayerId)?.display_name;
+      setDrillSuccess(`Added "${drill.name}" to ${playerName ?? 'their'}'s drill library.`);
     } catch (e) {
       setDrillError(e instanceof Error ? e.message : 'Failed to add drill.');
     } finally {
@@ -126,21 +127,29 @@ export default function AddPlayerScreen() {
       {players.length === 0 ? (
         <Text style={styles.placeholder}>No players linked yet — add one below.</Text>
       ) : (
-        <View style={styles.chipRow}>
-          {players.map((p) => (
-            <Pressable
-              key={p.id}
-              style={[styles.chip, selectedPlayerId === p.id && styles.chipSelected]}
-              onPress={() => setSelectedPlayerId(p.id)}
-            >
-              <Text
-                style={[styles.chipText, selectedPlayerId === p.id && styles.chipTextSelected]}
+        <>
+          {players.length > 1 ? (
+            <Text style={styles.placeholder}>
+              Tap a player to select them — joining a team and adding a
+              custom drill below both apply to whoever's selected.
+            </Text>
+          ) : null}
+          <View style={styles.chipRow}>
+            {players.map((p) => (
+              <Pressable
+                key={p.id}
+                style={[styles.chip, selectedPlayerId === p.id && styles.chipSelected]}
+                onPress={() => setSelectedPlayerId(p.id)}
               >
-                {p.display_name}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+                <Text
+                  style={[styles.chipText, selectedPlayerId === p.id && styles.chipTextSelected]}
+                >
+                  {p.display_name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
       )}
       <TextInput
         style={styles.input}
@@ -193,7 +202,11 @@ export default function AddPlayerScreen() {
 
       <Text style={styles.sectionTitle}>Add a custom drill</Text>
       <Text style={styles.placeholder}>
-        Add your own drill with a name and category — no limit on how many.
+        {players.length === 0
+          ? 'Add a player above first.'
+          : `Adds to ${
+              players.find((p) => p.id === selectedPlayerId)?.display_name ?? 'the selected player'
+            }'s drill library only — no limit on how many.`}
       </Text>
       {drillError ? <Text style={styles.error}>{drillError}</Text> : null}
       {drillSuccess ? <Text style={styles.success}>{drillSuccess}</Text> : null}
@@ -212,9 +225,12 @@ export default function AddPlayerScreen() {
         onChangeText={setDrillCategory}
       />
       <Pressable
-        style={[styles.button, (!drillName.trim() || addingDrill) && styles.buttonDisabled]}
+        style={[
+          styles.button,
+          (!drillName.trim() || !selectedPlayerId || addingDrill) && styles.buttonDisabled,
+        ]}
         onPress={handleAddDrill}
-        disabled={!drillName.trim() || addingDrill}
+        disabled={!drillName.trim() || !selectedPlayerId || addingDrill}
       >
         {addingDrill ? (
           <ActivityIndicator color="#FFFFFF" />

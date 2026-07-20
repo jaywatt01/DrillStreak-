@@ -32,7 +32,7 @@ export async function addPlayer(displayName: string): Promise<Player> {
   return data as Player;
 }
 
-export async function addCustomDrill(name: string, category: string): Promise<Drill> {
+export async function addCustomDrill(name: string, category: string, playerId: string): Promise<Drill> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
@@ -43,6 +43,7 @@ export async function addCustomDrill(name: string, category: string): Promise<Dr
       name,
       category: category.trim() || null,
       created_by_user_id: userId,
+      player_id: playerId,
       is_default: false,
     })
     .select('id, name, category')
@@ -78,12 +79,10 @@ export async function getWeeklyDrills(playerId: string): Promise<{ drills: Drill
     }
   }
 
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData.user?.id;
   const { data: libraryDrills, error: libraryError } = await supabase
     .from('drills')
     .select('id, name, category')
-    .or(`is_default.eq.true,created_by_user_id.eq.${userId}`)
+    .or(`is_default.eq.true,player_id.eq.${playerId}`)
     .order('category');
   if (libraryError) throw libraryError;
 

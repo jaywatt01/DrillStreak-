@@ -58,6 +58,12 @@ create table drills (
   category text, -- e.g. ballhandling / shooting / conditioning
   is_default boolean not null default false,
   created_by_user_id uuid references auth.users(id), -- null for seeded defaults
+  -- player this custom drill belongs to (null for defaults, and for a
+  -- coach's own team-assignment drills that aren't tied to one player).
+  -- Added July 20, 2026 after a real bug: without this, a custom drill
+  -- was scoped to the creating account, not the selected player, so a
+  -- guardian with two kids saw a drill meant for one show up for both.
+  player_id uuid references players(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
@@ -161,12 +167,16 @@ create policy team_memberships_access on team_memberships
   );
 
 -- drills: default library is world-readable; custom drills are visible to
--- their creator, plus anyone who can see an assignment/completion using them
+-- their creator, anyone who owns/guards the player they're scoped to (so a
+-- second guardian linked to the same player sees drills the first guardian
+-- made for that player), plus anyone who can see an assignment/completion
+-- using them
 create policy drills_select on drills
   for select
   using (
     is_default = true
     or created_by_user_id = auth.uid()
+    or (player_id is not null and is_player_owner_or_guardian(player_id, auth.uid()))
     or exists (
       select 1 from assignments a
       where a.drill_id = drills.id
@@ -177,9 +187,14 @@ create policy drills_select on drills
     )
   );
 
+-- if player_id is set, the creator must actually own/guard that player -
+-- prevents attaching a "custom drill" to a player you have no relationship to
 create policy drills_insert on drills
   for insert
-  with check (created_by_user_id = auth.uid());
+  with check (
+    created_by_user_id = auth.uid()
+    and (player_id is null or is_player_owner_or_guardian(player_id, auth.uid()))
+  );
 
 -- assignments: coach manages team assignments; guardian/player manages
 -- their own individual (non-team) assignments
