@@ -121,6 +121,8 @@ export default function MyTeamScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
     >
       {error ? <Text style={styles.error}>{error}</Text> : null}
 

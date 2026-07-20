@@ -121,6 +121,8 @@ export default function AddPlayerScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
     >
       <Text style={styles.sectionTitle}>Your players</Text>
       {playerError ? <Text style={styles.error}>{playerError}</Text> : null}
