@@ -251,6 +251,32 @@ revoke all on function redeem_team_invite(text, uuid) from anon;
 grant execute on function redeem_team_invite(text, uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- list_my_players: players the current user can log drills for — i.e. owns
+-- or guards. Deliberately narrower than what players_access RLS allows to
+-- see (which also includes players visible only because you coach their
+-- team) — the Home/Today screen is a player-side logging surface, not a
+-- coach roster view, so it must not surface players you can only see
+-- because you coach them. security invoker (default) so RLS on the
+-- underlying tables still applies as defense in depth.
+-- ---------------------------------------------------------------------------
+create or replace function list_my_players()
+returns setof players
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select p.* from players p
+  where p.created_by_user_id = auth.uid()
+  union
+  select p.* from players p
+  join guardianships g on g.player_id = p.id
+  where g.guardian_user_id = auth.uid();
+$$;
+
+grant execute on function list_my_players() to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Seed: default drill library (10 drills, 3 categories)
 -- ---------------------------------------------------------------------------
 insert into drills (name, category, is_default) values
