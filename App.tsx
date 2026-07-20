@@ -1,8 +1,12 @@
+import { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
+import type { Session } from '@supabase/supabase-js';
 
+import { supabase } from './src/lib/supabase';
+import AuthScreen from './src/screens/AuthScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import MyTeamScreen from './src/screens/MyTeamScreen';
 import AddPlayerScreen from './src/screens/AddPlayerScreen';
@@ -21,6 +25,39 @@ const TAB_ICONS: Record<string, string> = {
 };
 
 export default function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <AuthScreen />
+      </>
+    );
+  }
+
   return (
     <NavigationContainer>
       <StatusBar style="dark" />

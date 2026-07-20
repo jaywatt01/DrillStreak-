@@ -1,9 +1,11 @@
--- DrillStreak — draft schema
+-- DrillStreak — schema, RLS, and seed data
 --
--- This is a starting point to hand to Claude Code during the live Supabase
--- backend build step (see ../README.md, prompt 2) — not verified against a
--- running Supabase instance. Treat the RLS policies as a strong first draft
--- to test and correct live, not as already-audited security rules.
+-- This matches what's actually deployed to the live Supabase project
+-- (jiohhwahvzajvidbiqnm) as of 2026-07-20. Applied via two migrations:
+-- drillstreak_initial_schema, then fix_players_team_memberships_rls_recursion
+-- (see the second block below — the original draft had a real bug, caught
+-- by testing RLS as non-owner roles rather than trusting a service-role
+-- read-through, which bypasses RLS and would never have surfaced it).
 
 create extension if not exists "pgcrypto";
 
@@ -48,7 +50,7 @@ create table team_memberships (
 
 -- ---------------------------------------------------------------------------
 -- drills: shared default library + user/coach-created custom drills
--- No cap on custom drill count (decided July 19, 2026) — see DRILLSTREAK.md
+-- No cap on custom drill count (decided July 19, 2026)
 -- ---------------------------------------------------------------------------
 create table drills (
   id uuid primary key default gen_random_uuid(),
@@ -116,22 +118,46 @@ create policy guardianships_access on guardianships
   for all
   using (guardian_user_id = auth.uid());
 
--- teams: full access for the coach who owns it; read-only implied for
--- rostered players via team_memberships/players policies above
+-- teams: full access for the coach who owns it. Non-coaches CANNOT select
+-- from this table directly (would expose every team's invite_code to any
+-- logged-in user, defeating the point of a private code) — invite-code
+-- redemption goes through the redeem_team_invite() function below instead.
 create policy teams_coach_access on teams
   for all
   using (coach_user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- is_player_owner_or_guardian: security-definer helper used by policies
+-- below instead of an inline EXISTS on `players`. players_access (above)
+-- checks team_memberships; if team_memberships' own policy checked players
+-- directly, evaluating either policy would recurse into the other forever
+-- (confirmed live: "infinite recursion detected in policy for relation
+-- players"). This function bypasses RLS internally, breaking the cycle.
+-- ---------------------------------------------------------------------------
+create or replace function is_player_owner_or_guardian(p_player_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from players p
+    where p.id = p_player_id
+      and (p.created_by_user_id = p_user_id
+        or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = p_user_id))
+  );
+$$;
+
+revoke all on function is_player_owner_or_guardian(uuid, uuid) from public;
+revoke all on function is_player_owner_or_guardian(uuid, uuid) from anon;
+grant execute on function is_player_owner_or_guardian(uuid, uuid) to authenticated;
 
 create policy team_memberships_access on team_memberships
   for all
   using (
     exists (select 1 from teams t where t.id = team_memberships.team_id and t.coach_user_id = auth.uid())
-    or exists (
-      select 1 from players p
-      where p.id = team_memberships.player_id
-      and (p.created_by_user_id = auth.uid()
-        or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()))
-    )
+    or is_player_owner_or_guardian(team_memberships.player_id, auth.uid())
   );
 
 -- drills: default library is world-readable; custom drills are visible to
@@ -146,12 +172,7 @@ create policy drills_select on drills
       where a.drill_id = drills.id
       and (
         exists (select 1 from teams t where t.id = a.team_id and t.coach_user_id = auth.uid())
-        or exists (
-          select 1 from players p
-          where p.id = a.player_id
-          and (p.created_by_user_id = auth.uid()
-            or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()))
-        )
+        or is_player_owner_or_guardian(a.player_id, auth.uid())
       )
     )
   );
@@ -166,12 +187,7 @@ create policy assignments_access on assignments
   for all
   using (
     (team_id is not null and exists (select 1 from teams t where t.id = assignments.team_id and t.coach_user_id = auth.uid()))
-    or (player_id is not null and exists (
-      select 1 from players p
-      where p.id = assignments.player_id
-      and (p.created_by_user_id = auth.uid()
-        or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()))
-    ))
+    or (player_id is not null and is_player_owner_or_guardian(assignments.player_id, auth.uid()))
   );
 
 -- completions: writable by the player's owner/guardian; readable by them
@@ -179,14 +195,7 @@ create policy assignments_access on assignments
 -- whole point — coach sees real logs regardless of who defined the drill)
 create policy completions_owner_access on completions
   for all
-  using (
-    exists (
-      select 1 from players p
-      where p.id = completions.player_id
-      and (p.created_by_user_id = auth.uid()
-        or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()))
-    )
-  );
+  using (is_player_owner_or_guardian(completions.player_id, auth.uid()));
 
 create policy completions_coach_read on completions
   for select
@@ -197,6 +206,49 @@ create policy completions_coach_read on completions
       where tm.player_id = completions.player_id and t.coach_user_id = auth.uid()
     )
   );
+
+-- ---------------------------------------------------------------------------
+-- redeem_team_invite: lets a guardian/player join a team by invite code
+-- without exposing the teams table to broad SELECT. Runs as security
+-- definer so it can look up the team by code, but re-checks the caller
+-- actually owns/guards the player being added before inserting.
+-- ---------------------------------------------------------------------------
+create or replace function redeem_team_invite(p_invite_code text, p_player_id uuid)
+returns team_memberships
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_team teams;
+  v_result team_memberships;
+begin
+  select * into v_team from teams where invite_code = p_invite_code;
+  if v_team.id is null then
+    raise exception 'Invalid invite code';
+  end if;
+
+  if not exists (
+    select 1 from players p
+    where p.id = p_player_id
+      and (p.created_by_user_id = auth.uid()
+        or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()))
+  ) then
+    raise exception 'Not authorized for this player';
+  end if;
+
+  insert into team_memberships (team_id, player_id)
+  values (v_team.id, p_player_id)
+  on conflict (team_id, player_id) do nothing
+  returning * into v_result;
+
+  return v_result;
+end;
+$$;
+
+revoke all on function redeem_team_invite(text, uuid) from public;
+revoke all on function redeem_team_invite(text, uuid) from anon;
+grant execute on function redeem_team_invite(text, uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Seed: default drill library (10 drills, 3 categories)

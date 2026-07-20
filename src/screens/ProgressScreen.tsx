@@ -7,7 +7,7 @@ export default function ProgressScreen() {
       <Text style={styles.sectionTitle}>Progress</Text>
       <Text style={styles.placeholder}>
         Streak calendar and weekly recap per player. Free tier shows the
-        current week only — full history requires parent_tier.
+        current week only — full history requires the Parent membership.
       </Text>
     </ScrollView>
   );
