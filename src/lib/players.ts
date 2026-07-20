@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { mondayOfThisWeek, todayDateString } from './date';
 
 export type Player = {
   id: string;
@@ -10,20 +11,6 @@ export type Drill = {
   name: string;
   category: string | null;
 };
-
-function mondayOfThisWeek(): string {
-  const now = new Date();
-  const day = now.getDay(); // 0 = Sunday, 1 = Monday, ...
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-  return monday.toISOString().slice(0, 10);
-}
-
-function todayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export async function listMyPlayers(): Promise<Player[]> {
   const { data, error } = await supabase.rpc('list_my_players');
