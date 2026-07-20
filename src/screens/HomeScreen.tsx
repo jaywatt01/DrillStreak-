@@ -1,17 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import {
-  addPlayer,
   calculateStreak,
   Drill,
   getCompletionDates,
@@ -31,11 +22,10 @@ type PlayerCardData = {
 };
 
 export default function HomeScreen() {
+  const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cards, setCards] = useState<PlayerCardData[]>([]);
-  const [newPlayerName, setNewPlayerName] = useState('');
-  const [addingPlayer, setAddingPlayer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
 
@@ -77,21 +67,6 @@ export default function HomeScreen() {
     load();
   };
 
-  const handleAddPlayer = async () => {
-    if (!newPlayerName.trim()) return;
-    setAddingPlayer(true);
-    setError(null);
-    try {
-      await addPlayer(newPlayerName.trim());
-      setNewPlayerName('');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to add player.');
-    } finally {
-      setAddingPlayer(false);
-    }
-  };
-
   const handleMarkComplete = async (playerId: string, drillId: string) => {
     setMarkingId(drillId);
     setError(null);
@@ -123,29 +98,16 @@ export default function HomeScreen() {
 
       {cards.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.sectionTitle}>Add yourself as a player</Text>
+          <Text style={styles.sectionTitle}>No players yet</Text>
           <Text style={styles.placeholder}>
-            No players linked to your account yet. Add one to start logging
-            drills. (Joining a coach's team via invite code and adding kids
-            as a guardian comes soon.)
+            Add a player, join a team with a coach's invite code, or add a
+            custom drill from the Add a Player tab to get started.
           </Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Player name"
-            placeholderTextColor={colors.textMuted}
-            value={newPlayerName}
-            onChangeText={setNewPlayerName}
-          />
           <Pressable
-            style={[styles.addButton, (!newPlayerName.trim() || addingPlayer) && styles.buttonDisabled]}
-            onPress={handleAddPlayer}
-            disabled={!newPlayerName.trim() || addingPlayer}
+            style={styles.addButton}
+            onPress={() => navigation.navigate('Add a Player' as never)}
           >
-            {addingPlayer ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.addButtonText}>Add Player</Text>
-            )}
+            <Text style={styles.addButtonText}>Go to Add a Player</Text>
           </Pressable>
         </View>
       ) : (
@@ -217,23 +179,12 @@ const styles = StyleSheet.create({
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: colors.text,
-    backgroundColor: colors.surface,
-  },
   addButton: {
     backgroundColor: colors.primary,
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  buttonDisabled: { opacity: 0.6 },
   addButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   drillRow: {
     flexDirection: 'row',

@@ -32,6 +32,25 @@ export async function addPlayer(displayName: string): Promise<Player> {
   return data as Player;
 }
 
+export async function addCustomDrill(name: string, category: string): Promise<Drill> {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) throw new Error('Not signed in');
+
+  const { data, error } = await supabase
+    .from('drills')
+    .insert({
+      name,
+      category: category.trim() || null,
+      created_by_user_id: userId,
+      is_default: false,
+    })
+    .select('id, name, category')
+    .single();
+  if (error) throw error;
+  return data as Drill;
+}
+
 export async function getWeeklyDrills(playerId: string): Promise<{ drills: Drill[]; source: 'team' | 'library' }> {
   const { data: memberships, error: membershipError } = await supabase
     .from('team_memberships')

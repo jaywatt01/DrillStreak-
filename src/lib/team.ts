@@ -105,6 +105,14 @@ export async function unassignDrill(assignmentId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function joinTeamByInviteCode(inviteCode: string, playerId: string): Promise<void> {
+  const { error } = await supabase.rpc('redeem_team_invite', {
+    p_invite_code: inviteCode,
+    p_player_id: playerId,
+  });
+  if (error) throw error;
+}
+
 export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): Promise<RosterCompletion[]> {
   if (rosterPlayerIds.length === 0) return [];
 
