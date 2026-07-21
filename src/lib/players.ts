@@ -12,6 +12,8 @@ export type Drill = {
   category: string | null;
 };
 
+export type CustomDrill = Drill & { is_default: boolean };
+
 export async function listMyPlayers(): Promise<Player[]> {
   const { data, error } = await supabase.rpc('list_my_players');
   if (error) throw error;
@@ -30,6 +32,49 @@ export async function addPlayer(displayName: string): Promise<Player> {
     .single();
   if (error) throw error;
   return data as Player;
+}
+
+export async function renamePlayer(playerId: string, displayName: string): Promise<void> {
+  const { error } = await supabase
+    .from('players')
+    .update({ display_name: displayName })
+    .eq('id', playerId);
+  if (error) throw error;
+}
+
+export async function deletePlayer(playerId: string): Promise<void> {
+  const { error } = await supabase.from('players').delete().eq('id', playerId);
+  if (error) throw error;
+}
+
+export async function getMyCustomDrills(playerId: string): Promise<CustomDrill[]> {
+  const { data, error } = await supabase
+    .from('drills')
+    .select('id, name, category, is_default')
+    .eq('player_id', playerId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as CustomDrill[];
+}
+
+export async function renameDrill(drillId: string, name: string, category: string): Promise<void> {
+  const { error } = await supabase
+    .from('drills')
+    .update({ name, category: category.trim() || null })
+    .eq('id', drillId);
+  if (error) throw error;
+}
+
+export async function deleteDrill(drillId: string): Promise<void> {
+  const { error } = await supabase.from('drills').delete().eq('id', drillId);
+  if (error) {
+    if (error.code === '23503') {
+      throw new Error(
+        "Can't delete — this drill already has logged completions or assignments, so its history is preserved."
+      );
+    }
+    throw error;
+  }
 }
 
 export async function addCustomDrill(name: string, category: string, playerId: string): Promise<Drill> {

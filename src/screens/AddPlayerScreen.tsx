@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,7 +11,18 @@ import {
   View,
 } from 'react-native';
 import { colors } from '../theme/colors';
-import { addCustomDrill, addPlayer, listMyPlayers, Player } from '../lib/players';
+import {
+  addCustomDrill,
+  addPlayer,
+  CustomDrill,
+  deleteDrill,
+  deletePlayer,
+  getMyCustomDrills,
+  listMyPlayers,
+  Player,
+  renameDrill,
+  renamePlayer,
+} from '../lib/players';
 import { joinTeamByInviteCode } from '../lib/team';
 
 export default function AddPlayerScreen() {
@@ -23,6 +35,10 @@ export default function AddPlayerScreen() {
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
 
+  const [renamingPlayerId, setRenamingPlayerId] = useState<string | null>(null);
+  const [renamePlayerText, setRenamePlayerText] = useState('');
+  const [savingPlayerEdit, setSavingPlayerEdit] = useState(false);
+
   const [inviteCode, setInviteCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -33,6 +49,12 @@ export default function AddPlayerScreen() {
   const [addingDrill, setAddingDrill] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
   const [drillSuccess, setDrillSuccess] = useState<string | null>(null);
+
+  const [customDrills, setCustomDrills] = useState<CustomDrill[]>([]);
+  const [renamingDrillId, setRenamingDrillId] = useState<string | null>(null);
+  const [renameDrillName, setRenameDrillName] = useState('');
+  const [renameDrillCategory, setRenameDrillCategory] = useState('');
+  const [savingDrillEdit, setSavingDrillEdit] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -53,9 +75,26 @@ export default function AddPlayerScreen() {
     load();
   }, [load]);
 
+  const loadCustomDrills = useCallback(async (playerId: string) => {
+    try {
+      setCustomDrills(await getMyCustomDrills(playerId));
+    } catch (e) {
+      setDrillError(e instanceof Error ? e.message : 'Failed to load custom drills.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedPlayerId) {
+      loadCustomDrills(selectedPlayerId);
+    } else {
+      setCustomDrills([]);
+    }
+  }, [selectedPlayerId, loadCustomDrills]);
+
   const onRefresh = () => {
     setRefreshing(true);
     load();
+    if (selectedPlayerId) loadCustomDrills(selectedPlayerId);
   };
 
   const handleAddPlayer = async () => {
@@ -71,6 +110,59 @@ export default function AddPlayerScreen() {
       setPlayerError(e instanceof Error ? e.message : 'Failed to add player.');
     } finally {
       setAddingPlayer(false);
+    }
+  };
+
+  const handleLongPressPlayer = (player: Player) => {
+    Alert.alert(player.display_name, 'What would you like to do?', [
+      {
+        text: 'Rename',
+        onPress: () => {
+          setRenamingPlayerId(player.id);
+          setRenamePlayerText(player.display_name);
+        },
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert(
+            `Delete ${player.display_name}?`,
+            'This removes their profile and all their logged history. This can\'t be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await deletePlayer(player.id);
+                    await load();
+                  } catch (e) {
+                    setPlayerError(e instanceof Error ? e.message : 'Failed to delete player.');
+                  }
+                },
+              },
+            ]
+          );
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleSavePlayerRename = async () => {
+    if (!renamingPlayerId || !renamePlayerText.trim()) return;
+    setSavingPlayerEdit(true);
+    setPlayerError(null);
+    try {
+      await renamePlayer(renamingPlayerId, renamePlayerText.trim());
+      setRenamingPlayerId(null);
+      await load();
+    } catch (e) {
+      setPlayerError(e instanceof Error ? e.message : 'Failed to rename player.');
+    } finally {
+      setSavingPlayerEdit(false);
     }
   };
 
@@ -101,10 +193,61 @@ export default function AddPlayerScreen() {
       setDrillCategory('');
       const playerName = players.find((p) => p.id === selectedPlayerId)?.display_name;
       setDrillSuccess(`Added "${drill.name}" to ${playerName ?? 'their'}'s drill library.`);
+      await loadCustomDrills(selectedPlayerId);
     } catch (e) {
       setDrillError(e instanceof Error ? e.message : 'Failed to add drill.');
     } finally {
       setAddingDrill(false);
+    }
+  };
+
+  const handleLongPressDrill = (drill: CustomDrill) => {
+    Alert.alert(drill.name, 'What would you like to do?', [
+      {
+        text: 'Rename',
+        onPress: () => {
+          setRenamingDrillId(drill.id);
+          setRenameDrillName(drill.name);
+          setRenameDrillCategory(drill.category ?? '');
+        },
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('Delete this drill?', `Removes "${drill.name}" from the drill library.`, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await deleteDrill(drill.id);
+                  if (selectedPlayerId) await loadCustomDrills(selectedPlayerId);
+                } catch (e) {
+                  setDrillError(e instanceof Error ? e.message : 'Failed to delete drill.');
+                }
+              },
+            },
+          ]);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleSaveDrillRename = async () => {
+    if (!renamingDrillId || !renameDrillName.trim()) return;
+    setSavingDrillEdit(true);
+    setDrillError(null);
+    try {
+      await renameDrill(renamingDrillId, renameDrillName.trim(), renameDrillCategory.trim());
+      setRenamingDrillId(null);
+      if (selectedPlayerId) await loadCustomDrills(selectedPlayerId);
+    } catch (e) {
+      setDrillError(e instanceof Error ? e.message : 'Failed to rename drill.');
+    } finally {
+      setSavingDrillEdit(false);
     }
   };
 
@@ -130,18 +273,18 @@ export default function AddPlayerScreen() {
         <Text style={styles.placeholder}>No players linked yet — add one below.</Text>
       ) : (
         <>
-          {players.length > 1 ? (
-            <Text style={styles.placeholder}>
-              Tap a player to select them — joining a team and adding a
-              custom drill below both apply to whoever's selected.
-            </Text>
-          ) : null}
+          <Text style={styles.placeholder}>
+            Tap a player to select them — joining a team and adding a custom
+            drill below both apply to whoever's selected. Long-press a
+            player to rename or delete them.
+          </Text>
           <View style={styles.chipRow}>
             {players.map((p) => (
               <Pressable
                 key={p.id}
                 style={[styles.chip, selectedPlayerId === p.id && styles.chipSelected]}
                 onPress={() => setSelectedPlayerId(p.id)}
+                onLongPress={() => handleLongPressPlayer(p)}
               >
                 <Text
                   style={[styles.chipText, selectedPlayerId === p.id && styles.chipTextSelected]}
@@ -153,6 +296,41 @@ export default function AddPlayerScreen() {
           </View>
         </>
       )}
+
+      {renamingPlayerId ? (
+        <View style={styles.editRow}>
+          <TextInput
+            style={styles.input}
+            value={renamePlayerText}
+            onChangeText={setRenamePlayerText}
+            placeholder="Player name"
+            placeholderTextColor={colors.textMuted}
+          />
+          <View style={styles.editButtonRow}>
+            <Pressable
+              style={[styles.smallButton, styles.smallButtonSecondary]}
+              onPress={() => setRenamingPlayerId(null)}
+            >
+              <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.smallButton,
+                (!renamePlayerText.trim() || savingPlayerEdit) && styles.buttonDisabled,
+              ]}
+              onPress={handleSavePlayerRename}
+              disabled={!renamePlayerText.trim() || savingPlayerEdit}
+            >
+              {savingPlayerEdit ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.smallButtonText}>Save</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       <TextInput
         style={styles.input}
         placeholder="New player name"
@@ -208,10 +386,63 @@ export default function AddPlayerScreen() {
           ? 'Add a player above first.'
           : `Adds to ${
               players.find((p) => p.id === selectedPlayerId)?.display_name ?? 'the selected player'
-            }'s drill library only — no limit on how many.`}
+            }'s drill library only — no limit on how many. Long-press a
+              drill below to rename or delete it.`}
       </Text>
       {drillError ? <Text style={styles.error}>{drillError}</Text> : null}
       {drillSuccess ? <Text style={styles.success}>{drillSuccess}</Text> : null}
+
+      {customDrills.length > 0 ? (
+        <View style={styles.chipRow}>
+          {customDrills.map((d) => (
+            <Pressable key={d.id} style={styles.chip} onLongPress={() => handleLongPressDrill(d)}>
+              <Text style={styles.chipText}>{d.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      {renamingDrillId ? (
+        <View style={styles.editRow}>
+          <TextInput
+            style={styles.input}
+            value={renameDrillName}
+            onChangeText={setRenameDrillName}
+            placeholder="Drill name"
+            placeholderTextColor={colors.textMuted}
+          />
+          <TextInput
+            style={styles.input}
+            value={renameDrillCategory}
+            onChangeText={setRenameDrillCategory}
+            placeholder="Category (optional)"
+            placeholderTextColor={colors.textMuted}
+          />
+          <View style={styles.editButtonRow}>
+            <Pressable
+              style={[styles.smallButton, styles.smallButtonSecondary]}
+              onPress={() => setRenamingDrillId(null)}
+            >
+              <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.smallButton,
+                (!renameDrillName.trim() || savingDrillEdit) && styles.buttonDisabled,
+              ]}
+              onPress={handleSaveDrillRename}
+              disabled={!renameDrillName.trim() || savingDrillEdit}
+            >
+              {savingDrillEdit ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.smallButtonText}>Save</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       <TextInput
         style={styles.input}
         placeholder="Drill name"
@@ -285,4 +516,27 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  editRow: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#FFF8EA',
+  },
+  editButtonRow: { flexDirection: 'row', gap: 8 },
+  smallButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  smallButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  smallButtonSecondaryText: { color: colors.text, fontSize: 14, fontWeight: '600' },
 });

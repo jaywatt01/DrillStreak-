@@ -196,6 +196,18 @@ create policy drills_insert on drills
     and (player_id is null or is_player_owner_or_guardian(player_id, auth.uid()))
   );
 
+-- edit/delete only your own custom drills - never the seeded defaults.
+-- Added July 20, 2026: there was no UPDATE/DELETE policy on drills at all
+-- before this, so nobody could rename or remove a custom drill via the API.
+create policy drills_update on drills
+  for update
+  using (created_by_user_id = auth.uid() and is_default = false)
+  with check (created_by_user_id = auth.uid() and is_default = false);
+
+create policy drills_delete on drills
+  for delete
+  using (created_by_user_id = auth.uid() and is_default = false);
+
 -- assignments: coach manages team assignments; guardian/player manages
 -- their own individual (non-team) assignments
 create policy assignments_access on assignments

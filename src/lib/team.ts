@@ -11,6 +11,7 @@ export type Team = {
 export type RosterPlayer = {
   id: string;
   display_name: string;
+  membershipId: string;
 };
 
 export type AssignedDrill = Drill & { assignmentId: string };
@@ -55,13 +56,31 @@ export async function createTeam(name: string): Promise<Team> {
 export async function getRoster(teamId: string): Promise<RosterPlayer[]> {
   const { data, error } = await supabase
     .from('team_memberships')
-    .select('players(id, display_name)')
+    .select('id, players(id, display_name)')
     .eq('team_id', teamId);
   if (error) throw error;
 
   return (data ?? [])
-    .flatMap((row) => (Array.isArray(row.players) ? row.players : row.players ? [row.players] : []))
+    .flatMap((row) => {
+      const player = Array.isArray(row.players) ? row.players[0] : row.players;
+      return player ? [{ ...player, membershipId: row.id as string }] : [];
+    })
     .filter((p): p is RosterPlayer => p != null);
+}
+
+export async function renameTeam(teamId: string, name: string): Promise<void> {
+  const { error } = await supabase.from('teams').update({ name }).eq('id', teamId);
+  if (error) throw error;
+}
+
+export async function deleteTeam(teamId: string): Promise<void> {
+  const { error } = await supabase.from('teams').delete().eq('id', teamId);
+  if (error) throw error;
+}
+
+export async function removeFromRoster(membershipId: string): Promise<void> {
+  const { error } = await supabase.from('team_memberships').delete().eq('id', membershipId);
+  if (error) throw error;
 }
 
 export async function getAvailableDrills(): Promise<Drill[]> {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -15,11 +16,14 @@ import {
   assignDrillToTeam,
   AssignedDrill,
   createTeam,
+  deleteTeam,
   getAvailableDrills,
   getMyTeam,
   getRoster,
   getRosterCompletionsThisWeek,
   getWeeklyTeamAssignments,
+  removeFromRoster,
+  renameTeam,
   RosterCompletion,
   RosterPlayer,
   Team,
@@ -38,6 +42,9 @@ export default function MyTeamScreen() {
   const [creating, setCreating] = useState(false);
   const [togglingDrillId, setTogglingDrillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [renamingTeam, setRenamingTeam] = useState(false);
+  const [renameTeamText, setRenameTeamText] = useState('');
+  const [savingTeamEdit, setSavingTeamEdit] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -86,6 +93,78 @@ export default function MyTeamScreen() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleTeamOptions = () => {
+    if (!team) return;
+    Alert.alert(team.name, 'What would you like to do?', [
+      {
+        text: 'Rename Team',
+        onPress: () => {
+          setRenamingTeam(true);
+          setRenameTeamText(team.name);
+        },
+      },
+      {
+        text: 'Delete Team',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert(
+            `Delete ${team.name}?`,
+            'This removes the whole roster and this week\'s assignments. Players keep their own profiles and logged history. This can\'t be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await deleteTeam(team.id);
+                    await load();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Failed to delete team.');
+                  }
+                },
+              },
+            ]
+          );
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleSaveTeamRename = async () => {
+    if (!team || !renameTeamText.trim()) return;
+    setSavingTeamEdit(true);
+    setError(null);
+    try {
+      await renameTeam(team.id, renameTeamText.trim());
+      setRenamingTeam(false);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to rename team.');
+    } finally {
+      setSavingTeamEdit(false);
+    }
+  };
+
+  const handleLongPressRosterPlayer = (player: RosterPlayer) => {
+    Alert.alert(`Remove ${player.display_name}?`, 'Removes them from this team\'s roster. Their profile and logged history stay intact.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeFromRoster(player.membershipId);
+            await load();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to remove player.');
+          }
+        },
+      },
+    ]);
   };
 
   const handleToggleDrill = async (drill: Drill) => {
@@ -154,7 +233,46 @@ export default function MyTeamScreen() {
         </View>
       ) : (
         <>
-          <Text style={styles.teamName}>{team.name}</Text>
+          <View style={styles.teamNameRow}>
+            <Text style={styles.teamName}>{team.name}</Text>
+            <Pressable onPress={handleTeamOptions}>
+              <Text style={styles.editLink}>Edit</Text>
+            </Pressable>
+          </View>
+
+          {renamingTeam ? (
+            <View style={styles.editRow}>
+              <TextInput
+                style={styles.input}
+                value={renameTeamText}
+                onChangeText={setRenameTeamText}
+                placeholder="Team name"
+                placeholderTextColor={colors.textMuted}
+              />
+              <View style={styles.editButtonRow}>
+                <Pressable
+                  style={[styles.smallButton, styles.smallButtonSecondary]}
+                  onPress={() => setRenamingTeam(false)}
+                >
+                  <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.smallButton,
+                    (!renameTeamText.trim() || savingTeamEdit) && styles.buttonDisabled,
+                  ]}
+                  onPress={handleSaveTeamRename}
+                  disabled={!renameTeamText.trim() || savingTeamEdit}
+                >
+                  {savingTeamEdit ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.smallButtonText}>Save</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.inviteCard}>
             <Text style={styles.inviteLabel}>Invite code</Text>
@@ -171,11 +289,18 @@ export default function MyTeamScreen() {
               No players yet — share your invite code to get your roster started.
             </Text>
           ) : (
-            roster.map((p) => (
-              <View key={p.id} style={styles.rosterRow}>
-                <Text style={styles.rosterName}>{p.display_name}</Text>
-              </View>
-            ))
+            <>
+              <Text style={styles.placeholder}>Long-press a player to remove them from the roster.</Text>
+              {roster.map((p) => (
+                <Pressable
+                  key={p.id}
+                  style={styles.rosterRow}
+                  onLongPress={() => handleLongPressRosterPlayer(p)}
+                >
+                  <Text style={styles.rosterName}>{p.display_name}</Text>
+                </Pressable>
+              ))}
+            </>
           )}
 
           <Text style={styles.sectionTitle}>This week's drills</Text>
@@ -237,7 +362,36 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   error: { color: '#C4362B', fontSize: 13 },
   emptyState: { gap: 12 },
+  teamNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   teamName: { fontSize: 20, fontWeight: '700', color: colors.text },
+  editLink: { color: colors.primary, fontSize: 14, fontWeight: '600' },
+  editRow: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#FFF8EA',
+  },
+  editButtonRow: { flexDirection: 'row', gap: 8 },
+  smallButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  smallButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  smallButtonSecondaryText: { color: colors.text, fontSize: 14, fontWeight: '600' },
   inviteCard: {
     backgroundColor: colors.primary,
     borderRadius: 16,
