@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import {
@@ -12,6 +21,7 @@ import {
   logCompletion,
   Player,
 } from '../lib/players';
+import { addDrillToCalendar } from '../lib/calendar';
 
 type PlayerCardData = {
   player: Player;
@@ -28,6 +38,7 @@ export default function HomeScreen() {
   const [cards, setCards] = useState<PlayerCardData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [addingToCalendarId, setAddingToCalendarId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -77,6 +88,21 @@ export default function HomeScreen() {
       setError(e instanceof Error ? e.message : 'Failed to log completion.');
     } finally {
       setMarkingId(null);
+    }
+  };
+
+  const handleAddToCalendar = async (drill: Drill) => {
+    setAddingToCalendarId(drill.id);
+    try {
+      await addDrillToCalendar(drill.name, new Date());
+      Alert.alert('Added to calendar', `"${drill.name}" was added to your calendar for today.`);
+    } catch (e) {
+      Alert.alert(
+        'Could not add to calendar',
+        e instanceof Error ? e.message : 'Something went wrong.'
+      );
+    } finally {
+      setAddingToCalendarId(null);
     }
   };
 
@@ -132,26 +158,39 @@ export default function HomeScreen() {
               drills.map((drill) => {
                 const done = completedToday.has(drill.id);
                 return (
-                  <Pressable
-                    key={drill.id}
-                    style={[styles.drillRow, done && styles.drillRowDone]}
-                    onPress={() => handleMarkComplete(player.id, drill.id)}
-                    disabled={markingId === drill.id}
-                  >
-                    <View style={styles.drillRowText}>
-                      <Text style={styles.drillName}>{drill.name}</Text>
-                      {drill.category ? (
-                        <Text style={styles.drillCategory}>{drill.category}</Text>
-                      ) : null}
-                    </View>
-                    {markingId === drill.id ? (
-                      <ActivityIndicator color={colors.primary} />
-                    ) : (
-                      <Text style={done ? styles.checkDone : styles.checkPending}>
-                        {done ? '✓ Done' : 'Mark done'}
-                      </Text>
-                    )}
-                  </Pressable>
+                  <View key={drill.id} style={[styles.drillRow, done && styles.drillRowDone]}>
+                    <Pressable
+                      style={styles.drillRowMain}
+                      onPress={() => handleMarkComplete(player.id, drill.id)}
+                      disabled={markingId === drill.id}
+                    >
+                      <View style={styles.drillRowText}>
+                        <Text style={styles.drillName}>{drill.name}</Text>
+                        {drill.category ? (
+                          <Text style={styles.drillCategory}>{drill.category}</Text>
+                        ) : null}
+                      </View>
+                      {markingId === drill.id ? (
+                        <ActivityIndicator color={colors.primary} />
+                      ) : (
+                        <Text style={done ? styles.checkDone : styles.checkPending}>
+                          {done ? '✓ Done' : 'Mark done'}
+                        </Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      style={styles.calendarButton}
+                      onPress={() => handleAddToCalendar(drill)}
+                      disabled={addingToCalendarId === drill.id}
+                      hitSlop={8}
+                    >
+                      {addingToCalendarId === drill.id ? (
+                        <ActivityIndicator color={colors.primary} size="small" />
+                      ) : (
+                        <Text style={styles.calendarButtonText}>📅</Text>
+                      )}
+                    </Pressable>
+                  </View>
                 );
               })
             )}
@@ -189,21 +228,29 @@ const styles = StyleSheet.create({
   drillRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingRight: 12,
     backgroundColor: colors.surface,
   },
   drillRowDone: {
     borderColor: colors.accent,
     backgroundColor: '#FFF8EA',
   },
+  drillRowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   drillRowText: { flex: 1, marginRight: 12 },
   drillName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   checkPending: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   checkDone: { color: colors.accentDark, fontSize: 13, fontWeight: '700' },
+  calendarButton: { paddingLeft: 8 },
+  calendarButtonText: { fontSize: 20 },
 });

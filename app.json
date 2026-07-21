@@ -20,6 +20,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow DrillStreak to add drill events to your calendar."
+        }
+      ]
+    ]
   }
 }
