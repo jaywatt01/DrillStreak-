@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,8 +12,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { colors } from '../theme/colors';
-import { Drill } from '../lib/players';
+import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
 import {
   assignDrillToTeam,
   AssignedDrill,
@@ -28,7 +31,33 @@ import {
   RosterPlayer,
   Team,
   unassignDrill,
+  updateAssignmentSchedule,
 } from '../lib/team';
+
+// "HH:MM:SS" (Postgres `time`) <-> a plain Date used just to drive the
+// picker UI. Only the hour/minute round-trip through the database.
+function timeStringToDate(time: string | null): Date {
+  const date = new Date();
+  if (time) {
+    const [hours, minutes] = time.split(':').map(Number);
+    date.setHours(hours, minutes, 0, 0);
+  }
+  return date;
+}
+
+function dateToTimeString(date: Date): string {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:00`;
+}
+
+function formatScheduleLabel(scheduledTime: string | null, durationMinutes: number | null): string | null {
+  if (!scheduledTime && !durationMinutes) return null;
+  const time = scheduledTime
+    ? timeStringToDate(scheduledTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : null;
+  if (time && durationMinutes) return `${time} · ${durationMinutes} min`;
+  if (time) return time;
+  return `${durationMinutes} min`;
+}
 
 export default function MyTeamScreen() {
   const [loading, setLoading] = useState(true);
@@ -45,6 +74,10 @@ export default function MyTeamScreen() {
   const [renamingTeam, setRenamingTeam] = useState(false);
   const [renameTeamText, setRenameTeamText] = useState('');
   const [savingTeamEdit, setSavingTeamEdit] = useState(false);
+  const [schedulingDrill, setSchedulingDrill] = useState<AssignedDrill | null>(null);
+  const [pickerTime, setPickerTime] = useState(new Date());
+  const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -165,6 +198,41 @@ export default function MyTeamScreen() {
         },
       },
     ]);
+  };
+
+  const openScheduler = (assigned: AssignedDrill) => {
+    setPickerTime(timeStringToDate(assigned.scheduledTime));
+    setPickerDuration(String(assigned.durationMinutes ?? assigned.estimatedMinutes ?? DEFAULT_DRILL_MINUTES));
+    setSchedulingDrill(assigned);
+  };
+
+  const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === 'android' && event.type === 'dismissed') {
+      setSchedulingDrill(null);
+      return;
+    }
+    if (selected) setPickerTime(selected);
+  };
+
+  const handleConfirmSchedule = async () => {
+    if (!schedulingDrill) return;
+    const minutes = parseInt(pickerDuration, 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      Alert.alert('Invalid duration', 'Enter a duration in minutes greater than 0.');
+      return;
+    }
+
+    setSavingSchedule(true);
+    setError(null);
+    try {
+      await updateAssignmentSchedule(schedulingDrill.assignmentId, dateToTimeString(pickerTime), minutes);
+      setSchedulingDrill(null);
+      if (team) setAssignedDrills(await getWeeklyTeamAssignments(team.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to set schedule.');
+    } finally {
+      setSavingSchedule(false);
+    }
   };
 
   const handleToggleDrill = async (drill: Drill) => {
@@ -309,28 +377,40 @@ export default function MyTeamScreen() {
             again to remove it.
           </Text>
           {availableDrills.map((drill) => {
-            const assigned = assignedDrills.some((d) => d.id === drill.id);
+            const assignedDrill = assignedDrills.find((d) => d.id === drill.id);
+            const assigned = assignedDrill != null;
+            const scheduleLabel = assignedDrill
+              ? formatScheduleLabel(assignedDrill.scheduledTime, assignedDrill.durationMinutes)
+              : null;
             return (
-              <Pressable
-                key={drill.id}
-                style={[styles.drillRow, assigned && styles.drillRowAssigned]}
-                onPress={() => handleToggleDrill(drill)}
-                disabled={togglingDrillId === drill.id}
-              >
-                <View style={styles.drillRowText}>
-                  <Text style={styles.drillName}>{drill.name}</Text>
-                  {drill.category ? (
-                    <Text style={styles.drillCategory}>{drill.category}</Text>
-                  ) : null}
-                </View>
-                {togglingDrillId === drill.id ? (
-                  <ActivityIndicator color={colors.primary} />
-                ) : (
-                  <Text style={assigned ? styles.assignedTag : styles.assignTag}>
-                    {assigned ? '✓ Assigned' : 'Assign'}
-                  </Text>
-                )}
-              </Pressable>
+              <View key={drill.id} style={[styles.drillRow, assigned && styles.drillRowAssigned]}>
+                <Pressable
+                  style={styles.drillRowMain}
+                  onPress={() => handleToggleDrill(drill)}
+                  disabled={togglingDrillId === drill.id}
+                >
+                  <View style={styles.drillRowText}>
+                    <Text style={styles.drillName}>{drill.name}</Text>
+                    {drill.category ? (
+                      <Text style={styles.drillCategory}>{drill.category}</Text>
+                    ) : null}
+                  </View>
+                  {togglingDrillId === drill.id ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Text style={assigned ? styles.assignedTag : styles.assignTag}>
+                      {assigned ? '✓ Assigned' : 'Assign'}
+                    </Text>
+                  )}
+                </Pressable>
+                {assignedDrill ? (
+                  <Pressable onPress={() => openScheduler(assignedDrill)} hitSlop={8}>
+                    <Text style={styles.scheduleLink}>
+                      {scheduleLabel ? `⏰ ${scheduleLabel}` : '⏰ Set suggested time'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             );
           })}
 
@@ -352,6 +432,56 @@ export default function MyTeamScreen() {
           )}
         </>
       )}
+
+      <Modal
+        visible={schedulingDrill != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSchedulingDrill(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{schedulingDrill?.name}</Text>
+            <Text style={styles.placeholder}>
+              Sets the suggested time each player's calendar picker opens to —
+              they still choose whether to add it, and can change the time.
+            </Text>
+            <Text style={styles.modalLabel}>Suggested time</Text>
+            <DateTimePicker
+              value={pickerTime}
+              mode="time"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={handlePickerChange}
+            />
+            <Text style={styles.modalLabel}>Duration (minutes)</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={pickerDuration}
+              onChangeText={setPickerDuration}
+            />
+            <View style={styles.editButtonRow}>
+              <Pressable
+                style={[styles.smallButton, styles.smallButtonSecondary]}
+                onPress={() => setSchedulingDrill(null)}
+              >
+                <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.smallButton, savingSchedule && styles.buttonDisabled]}
+                onPress={handleConfirmSchedule}
+                disabled={savingSchedule}
+              >
+                {savingSchedule ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.smallButtonText}>Save</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -436,25 +566,43 @@ const styles = StyleSheet.create({
   },
   rosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     backgroundColor: colors.surface,
+    gap: 6,
   },
   drillRowAssigned: {
     borderColor: colors.accent,
     backgroundColor: '#FFF8EA',
+  },
+  drillRowMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   drillRowText: { flex: 1, marginRight: 12 },
   drillName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   assignTag: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   assignedTag: { color: colors.accentDark, fontSize: 13, fontWeight: '700' },
+  scheduleLink: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    gap: 8,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 },
+  modalLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 8 },
   activityRow: {
     borderWidth: 1,
     borderColor: colors.border,

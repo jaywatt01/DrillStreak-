@@ -15,6 +15,7 @@ import {
   addCustomDrill,
   addPlayer,
   CustomDrill,
+  DEFAULT_DRILL_MINUTES,
   deleteDrill,
   deletePlayer,
   getMyCustomDrills,
@@ -46,6 +47,7 @@ export default function AddPlayerScreen() {
 
   const [drillName, setDrillName] = useState('');
   const [drillCategory, setDrillCategory] = useState('');
+  const [drillMinutes, setDrillMinutes] = useState('');
   const [addingDrill, setAddingDrill] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
   const [drillSuccess, setDrillSuccess] = useState<string | null>(null);
@@ -184,13 +186,23 @@ export default function AddPlayerScreen() {
 
   const handleAddDrill = async () => {
     if (!drillName.trim() || !selectedPlayerId) return;
+    const parsedMinutes = parseInt(drillMinutes, 10);
+    const estimatedMinutes = drillMinutes.trim() && Number.isFinite(parsedMinutes) && parsedMinutes > 0
+      ? parsedMinutes
+      : null;
     setAddingDrill(true);
     setDrillError(null);
     setDrillSuccess(null);
     try {
-      const drill = await addCustomDrill(drillName.trim(), drillCategory.trim(), selectedPlayerId);
+      const drill = await addCustomDrill(
+        drillName.trim(),
+        drillCategory.trim(),
+        selectedPlayerId,
+        estimatedMinutes
+      );
       setDrillName('');
       setDrillCategory('');
+      setDrillMinutes('');
       const playerName = players.find((p) => p.id === selectedPlayerId)?.display_name;
       setDrillSuccess(`Added "${drill.name}" to ${playerName ?? 'their'}'s drill library.`);
       await loadCustomDrills(selectedPlayerId);
@@ -456,6 +468,14 @@ export default function AddPlayerScreen() {
         placeholderTextColor={colors.textMuted}
         value={drillCategory}
         onChangeText={setDrillCategory}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder={`Duration in minutes (optional, defaults to ${DEFAULT_DRILL_MINUTES})`}
+        placeholderTextColor={colors.textMuted}
+        keyboardType="number-pad"
+        value={drillMinutes}
+        onChangeText={setDrillMinutes}
       />
       <Pressable
         style={[

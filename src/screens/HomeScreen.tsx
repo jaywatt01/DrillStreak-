@@ -2,34 +2,50 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import {
   calculateStreak,
-  Drill,
+  DEFAULT_DRILL_MINUTES,
   getCompletionDates,
   getTodayCompletedDrillIds,
   getWeeklyDrills,
   listMyPlayers,
   logCompletion,
   Player,
+  WeeklyDrill,
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
 
 type PlayerCardData = {
   player: Player;
-  drills: Drill[];
+  drills: WeeklyDrill[];
   source: 'team' | 'library';
   streak: number;
   completedToday: Set<string>;
 };
+
+// Parses a Postgres `time` column value ("HH:MM:SS") onto today's date.
+// Falls back to the current time if the drill has no coach-set schedule.
+function timeForToday(scheduledTime: string | null): Date {
+  const date = new Date();
+  if (scheduledTime) {
+    const [hours, minutes] = scheduledTime.split(':').map(Number);
+    date.setHours(hours, minutes, 0, 0);
+  }
+  return date;
+}
 
 export default function HomeScreen() {
   const navigation = useNavigation();
@@ -39,6 +55,9 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [addingToCalendarId, setAddingToCalendarId] = useState<string | null>(null);
+  const [schedulingFor, setSchedulingFor] = useState<WeeklyDrill | null>(null);
+  const [pickerTime, setPickerTime] = useState(new Date());
+  const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
 
   const load = useCallback(async () => {
     setError(null);
@@ -91,11 +110,38 @@ export default function HomeScreen() {
     }
   };
 
-  const handleAddToCalendar = async (drill: Drill) => {
+  const openScheduler = (drill: WeeklyDrill) => {
+    setPickerTime(timeForToday(drill.scheduledTime));
+    setPickerDuration(String(drill.scheduledDurationMinutes ?? drill.estimatedMinutes ?? DEFAULT_DRILL_MINUTES));
+    setSchedulingFor(drill);
+  };
+
+  const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === 'android') {
+      // Android's picker is a self-dismissing dialog, not an inline control —
+      // a cancel tap fires 'dismissed' with no date, so close our modal too.
+      if (event.type === 'dismissed') {
+        setSchedulingFor(null);
+        return;
+      }
+    }
+    if (selected) setPickerTime(selected);
+  };
+
+  const handleConfirmSchedule = async () => {
+    if (!schedulingFor) return;
+    const minutes = parseInt(pickerDuration, 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      Alert.alert('Invalid duration', 'Enter a duration in minutes greater than 0.');
+      return;
+    }
+
+    const drill = schedulingFor;
+    setSchedulingFor(null);
     setAddingToCalendarId(drill.id);
     try {
-      await addDrillToCalendar(drill.name, new Date());
-      Alert.alert('Added to calendar', `"${drill.name}" was added to your calendar for today.`);
+      await addDrillToCalendar(drill.name, pickerTime, minutes);
+      Alert.alert('Added to calendar', `"${drill.name}" was added to your calendar.`);
     } catch (e) {
       Alert.alert(
         'Could not add to calendar',
@@ -180,7 +226,7 @@ export default function HomeScreen() {
                     </Pressable>
                     <Pressable
                       style={styles.calendarButton}
-                      onPress={() => handleAddToCalendar(drill)}
+                      onPress={() => openScheduler(drill)}
                       disabled={addingToCalendarId === drill.id}
                       hitSlop={8}
                     >
@@ -197,6 +243,44 @@ export default function HomeScreen() {
           </View>
         ))
       )}
+
+      <Modal
+        visible={schedulingFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSchedulingFor(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{schedulingFor?.name}</Text>
+            <Text style={styles.modalLabel}>Time</Text>
+            <DateTimePicker
+              value={pickerTime}
+              mode="time"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={handlePickerChange}
+            />
+            <Text style={styles.modalLabel}>Duration (minutes)</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={pickerDuration}
+              onChangeText={setPickerDuration}
+            />
+            <View style={styles.modalButtonRow}>
+              <Pressable
+                style={[styles.smallButton, styles.smallButtonSecondary]}
+                onPress={() => setSchedulingFor(null)}
+              >
+                <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.smallButton} onPress={handleConfirmSchedule}>
+                <Text style={styles.smallButtonText}>Add to Calendar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -253,4 +337,43 @@ const styles = StyleSheet.create({
   checkDone: { color: colors.accentDark, fontSize: 13, fontWeight: '700' },
   calendarButton: { paddingLeft: 8 },
   calendarButtonText: { fontSize: 20 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    gap: 8,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 },
+  modalLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 8 },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: colors.background,
+  },
+  modalButtonRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  smallButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  smallButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  smallButtonSecondaryText: { color: colors.text, fontSize: 14, fontWeight: '600' },
 });

@@ -12,7 +12,11 @@ export async function requestCalendarWriteAccess(): Promise<boolean> {
   return status === Calendar.PermissionStatus.GRANTED;
 }
 
-export async function addDrillToCalendar(drillName: string, date: Date): Promise<void> {
+export async function addDrillToCalendar(
+  drillName: string,
+  startDate: Date,
+  durationMinutes: number
+): Promise<void> {
   const granted = await requestCalendarWriteAccess();
   if (!granted) {
     throw new Error('Calendar permission was not granted.');
@@ -23,10 +27,7 @@ export async function addDrillToCalendar(drillName: string, date: Date): Promise
     throw new Error('No default calendar found on this device.');
   }
 
-  const startDate = new Date(date);
-  startDate.setHours(9, 0, 0, 0);
-  const endDate = new Date(startDate);
-  endDate.setHours(startDate.getHours() + 1);
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
 
   await Calendar.createEventAsync(defaultCalendar.id, {
     title: drillName,

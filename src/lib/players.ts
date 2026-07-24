@@ -6,13 +6,37 @@ export type Player = {
   display_name: string;
 };
 
+// Fallback event length for any drill with no set duration (custom or
+// seeded). 30, not 60 — most drills in the seeded library run 5-10 min,
+// and a blanket hour block overstates almost all of them.
+export const DEFAULT_DRILL_MINUTES = 30;
+
 export type Drill = {
   id: string;
   name: string;
   category: string | null;
+  estimatedMinutes: number | null;
 };
 
 export type CustomDrill = Drill & { is_default: boolean };
+
+export const DRILL_SELECT_COLUMNS = 'id, name, category, estimated_minutes';
+
+// Maps a raw `drills` row (snake_case, as returned by supabase-js) to the
+// camelCase Drill shape used throughout the app.
+export function mapDrillRow(row: {
+  id: string;
+  name: string;
+  category: string | null;
+  estimated_minutes: number | null;
+}): Drill {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    estimatedMinutes: row.estimated_minutes,
+  };
+}
 
 export async function listMyPlayers(): Promise<Player[]> {
   const { data, error } = await supabase.rpc('list_my_players');
@@ -50,11 +74,11 @@ export async function deletePlayer(playerId: string): Promise<void> {
 export async function getMyCustomDrills(playerId: string): Promise<CustomDrill[]> {
   const { data, error } = await supabase
     .from('drills')
-    .select('id, name, category, is_default')
+    .select(`${DRILL_SELECT_COLUMNS}, is_default`)
     .eq('player_id', playerId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []) as CustomDrill[];
+  return (data ?? []).map((row) => ({ ...mapDrillRow(row), is_default: row.is_default as boolean }));
 }
 
 export async function renameDrill(drillId: string, name: string, category: string): Promise<void> {
@@ -77,7 +101,12 @@ export async function deleteDrill(drillId: string): Promise<void> {
   }
 }
 
-export async function addCustomDrill(name: string, category: string, playerId: string): Promise<Drill> {
+export async function addCustomDrill(
+  name: string,
+  category: string,
+  playerId: string,
+  estimatedMinutes: number | null
+): Promise<Drill> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
@@ -90,14 +119,23 @@ export async function addCustomDrill(name: string, category: string, playerId: s
       created_by_user_id: userId,
       player_id: playerId,
       is_default: false,
+      estimated_minutes: estimatedMinutes,
     })
-    .select('id, name, category')
+    .select(DRILL_SELECT_COLUMNS)
     .single();
   if (error) throw error;
-  return data as Drill;
+  return mapDrillRow(data);
 }
 
-export async function getWeeklyDrills(playerId: string): Promise<{ drills: Drill[]; source: 'team' | 'library' }> {
+// A drill as it appears on Home, carrying the coach's suggested
+// time/duration for this week's assignment when there is one (team
+// source only — a library drill has no per-assignment schedule, just
+// whatever estimatedMinutes is set on the drill itself).
+export type WeeklyDrill = Drill & { scheduledTime: string | null; scheduledDurationMinutes: number | null };
+
+export async function getWeeklyDrills(
+  playerId: string
+): Promise<{ drills: WeeklyDrill[]; source: 'team' | 'library' }> {
   const { data: memberships, error: membershipError } = await supabase
     .from('team_memberships')
     .select('team_id')
@@ -109,14 +147,24 @@ export async function getWeeklyDrills(playerId: string): Promise<{ drills: Drill
   if (teamIds.length > 0) {
     const { data: assignments, error: assignmentError } = await supabase
       .from('assignments')
-      .select('drills(id, name, category)')
+      .select(`scheduled_time, duration_minutes, drills(${DRILL_SELECT_COLUMNS})`)
       .in('team_id', teamIds)
       .eq('week_of', mondayOfThisWeek());
     if (assignmentError) throw assignmentError;
 
     const drills = (assignments ?? [])
-      .flatMap((a) => (Array.isArray(a.drills) ? a.drills : a.drills ? [a.drills] : []))
-      .filter((d): d is Drill => d != null);
+      .flatMap((a) => {
+        const drillRow = Array.isArray(a.drills) ? a.drills[0] : a.drills;
+        if (!drillRow) return [];
+        return [
+          {
+            ...mapDrillRow(drillRow),
+            scheduledTime: a.scheduled_time as string | null,
+            scheduledDurationMinutes: a.duration_minutes as number | null,
+          },
+        ];
+      })
+      .filter((d): d is WeeklyDrill => d != null);
 
     const deduped = Array.from(new Map(drills.map((d) => [d.id, d])).values());
     if (deduped.length > 0) {
@@ -126,12 +174,19 @@ export async function getWeeklyDrills(playerId: string): Promise<{ drills: Drill
 
   const { data: libraryDrills, error: libraryError } = await supabase
     .from('drills')
-    .select('id, name, category')
+    .select(DRILL_SELECT_COLUMNS)
     .or(`is_default.eq.true,player_id.eq.${playerId}`)
     .order('category');
   if (libraryError) throw libraryError;
 
-  return { drills: (libraryDrills ?? []) as Drill[], source: 'library' };
+  return {
+    drills: (libraryDrills ?? []).map((row) => ({
+      ...mapDrillRow(row),
+      scheduledTime: null,
+      scheduledDurationMinutes: null,
+    })),
+    source: 'library',
+  };
 }
 
 export async function getCompletionDates(playerId: string): Promise<string[]> {

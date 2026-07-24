@@ -6,6 +6,12 @@
 -- (see the second block below — the original draft had a real bug, caught
 -- by testing RLS as non-owner roles rather than trusting a service-role
 -- read-through, which bypasses RLS and would never have surfaced it).
+--
+-- add_drill_duration_and_assignment_schedule (2026-07-24) adds
+-- estimated_minutes to drills and scheduled_time/duration_minutes to
+-- assignments, both nullable, both covered by existing RLS policies
+-- (no new policy needed — same rows, new columns). See that block below
+-- for the exact statements and the seeded-drill backfill.
 
 create extension if not exists "pgcrypto";
 
@@ -64,7 +70,11 @@ create table drills (
   -- was scoped to the creating account, not the selected player, so a
   -- guardian with two kids saw a drill meant for one show up for both.
   player_id uuid references players(id) on delete cascade,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Estimated length of the drill, in minutes. Null for anything without a
+  -- set duration (most reps-based drills) — the app falls back to a 30-min
+  -- default at add-to-calendar time rather than a fabricated per-drill guess.
+  estimated_minutes integer
 );
 
 -- ---------------------------------------------------------------------------
@@ -77,7 +87,13 @@ create table assignments (
   drill_id uuid not null references drills(id),
   week_of date not null,
   created_at timestamptz not null default now(),
-  check (team_id is not null or player_id is not null)
+  check (team_id is not null or player_id is not null),
+  -- Coach-set suggested time/duration for a team assignment (added
+  -- 2026-07-24). This is a default the player's calendar picker pre-fills
+  -- to, not a push to their calendar — expo-calendar only ever writes to
+  -- whichever device is running the app.
+  scheduled_time time,
+  duration_minutes integer
 );
 
 -- ---------------------------------------------------------------------------
@@ -305,15 +321,33 @@ grant execute on function list_my_players() to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Seed: default drill library (10 drills, 3 categories)
+-- estimated_minutes is only backfilled for the 4 drills that already state
+-- a time in their name — the other 6 are rep-based with no stated time, so
+-- they're left null rather than inventing a fabricated per-drill estimate;
+-- the app's 30-min default applies to those at add-to-calendar time.
 -- ---------------------------------------------------------------------------
-insert into drills (name, category, is_default) values
-  ('50 form shooting reps', 'shooting', true),
-  ('100 free throws', 'shooting', true),
-  ('Spot-up shooting, 5 spots x 10', 'shooting', true),
-  ('Two-ball dribbling, 5 min', 'ballhandling', true),
-  ('Cone weave dribbling, 10 reps', 'ballhandling', true),
-  ('Crossover series, 5 min', 'ballhandling', true),
-  ('Suicides x 5', 'conditioning', true),
-  ('Defensive slides, 5 min', 'conditioning', true),
-  ('Jump rope, 10 min', 'conditioning', true),
-  ('Full-court sprints x 10', 'conditioning', true);
+insert into drills (name, category, is_default, estimated_minutes) values
+  ('50 form shooting reps', 'shooting', true, null),
+  ('100 free throws', 'shooting', true, null),
+  ('Spot-up shooting, 5 spots x 10', 'shooting', true, null),
+  ('Two-ball dribbling, 5 min', 'ballhandling', true, 5),
+  ('Cone weave dribbling, 10 reps', 'ballhandling', true, null),
+  ('Crossover series, 5 min', 'ballhandling', true, 5),
+  ('Suicides x 5', 'conditioning', true, null),
+  ('Defensive slides, 5 min', 'conditioning', true, 5),
+  ('Jump rope, 10 min', 'conditioning', true, 10),
+  ('Full-court sprints x 10', 'conditioning', true, null);
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-07-24): the block
+-- above only applies estimated_minutes on a fresh seed. Run this against
+-- the live project to add the new columns and backfill the same 4 drills.
+-- ---------------------------------------------------------------------------
+-- alter table drills add column estimated_minutes integer;
+-- alter table assignments add column scheduled_time time;
+-- alter table assignments add column duration_minutes integer;
+--
+-- update drills set estimated_minutes = 5 where name = 'Two-ball dribbling, 5 min';
+-- update drills set estimated_minutes = 5 where name = 'Crossover series, 5 min';
+-- update drills set estimated_minutes = 5 where name = 'Defensive slides, 5 min';
+-- update drills set estimated_minutes = 10 where name = 'Jump rope, 10 min';
