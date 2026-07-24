@@ -8,7 +8,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.drillstreak.app"
+      "bundleIdentifier": "com.drillstreak.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.drillstreak.app",
@@ -22,6 +25,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6f54fbad-e16a-4d03-920c-8d7d3ffeeb5b"
+      }
     },
     "plugins": [
       [
