@@ -6,6 +6,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
+import { clearPurchasesUser, configurePurchases, identifyPurchasesUser } from './src/lib/purchases';
 import AuthScreen from './src/screens/AuthScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import MyTeamScreen from './src/screens/MyTeamScreen';
@@ -29,13 +30,21 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    configurePurchases();
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
+      if (data.session?.user.id) identifyPurchasesUser(data.session.user.id);
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
+      if (newSession?.user.id) {
+        identifyPurchasesUser(newSession.user.id);
+      } else {
+        clearPurchasesUser();
+      }
     });
 
     return () => subscription.subscription.unsubscribe();

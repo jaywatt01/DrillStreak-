@@ -10,7 +10,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
+import { useParentEntitlement } from '../lib/purchases';
 import {
   addCustomDrill,
   addPlayer,
@@ -27,6 +29,8 @@ import {
 import { joinTeamByInviteCode } from '../lib/team';
 
 export default function AddPlayerScreen() {
+  const navigation = useNavigation();
+  const { hasParentTier } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -101,6 +105,17 @@ export default function AddPlayerScreen() {
 
   const handleAddPlayer = async () => {
     if (!newPlayerName.trim()) return;
+    if (!hasParentTier && players.length >= 1) {
+      Alert.alert(
+        'Free plan limit reached',
+        'Free accounts can link one player. Parent membership ($4.99/mo) unlocks unlimited linked players.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'See Account', onPress: () => navigation.navigate('Account' as never) },
+        ]
+      );
+      return;
+    }
     setAddingPlayer(true);
     setPlayerError(null);
     try {

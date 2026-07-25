@@ -189,6 +189,32 @@ export async function getWeeklyDrills(
   };
 }
 
+export type CompletionHistoryEntry = { date: string; drillNames: string[] };
+
+// Full logged history for a player, most recent day first, each day's
+// drills grouped together. Gating (current-week-only for free users) is
+// the caller's responsibility — this always returns everything so the
+// caller can also tell whether there's more history a paywall would unlock.
+export async function getCompletionHistory(playerId: string): Promise<CompletionHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from('completions')
+    .select('date, drills(name)')
+    .eq('player_id', playerId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+
+  const byDate = new Map<string, string[]>();
+  for (const row of data ?? []) {
+    const drill = Array.isArray(row.drills) ? row.drills[0] : row.drills;
+    if (!drill) continue;
+    const date = row.date as string;
+    const existing = byDate.get(date) ?? [];
+    existing.push(drill.name as string);
+    byDate.set(date, existing);
+  }
+  return Array.from(byDate.entries()).map(([date, drillNames]) => ({ date, drillNames }));
+}
+
 export async function getCompletionDates(playerId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from('completions')

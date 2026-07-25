@@ -343,11 +343,12 @@ export default function MyTeamScreen() {
           ) : null}
 
           <View style={styles.inviteCard}>
-            <Text style={styles.inviteLabel}>Invite code</Text>
+            <Text style={styles.inviteLabel}>Invite code · free for coaches, always</Text>
             <Text style={styles.inviteCode}>{team.invite_code}</Text>
             <Text style={styles.invitePlaceholder}>
-              Share this with players/parents so they can join from Add a
-              Player.
+              Share this with every player and parent on your roster — the
+              more of them who join, the more accountability data you see on
+              your own roster activity feed below, at no cost to you.
             </Text>
           </View>
 
