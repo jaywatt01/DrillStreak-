@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -53,7 +54,12 @@ export default function AuthScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>DrillStreak</Text>
+        <Image
+          source={require('../../assets/branding/drillstreak-wordmark.png')}
+          style={styles.logo}
+          resizeMode="contain"
+          accessibilityLabel="DrillStreak"
+        />
         <Text style={styles.subtitle}>
           {mode === 'signIn' ? 'Sign in to continue' : 'Create an account'}
         </Text>
@@ -117,7 +123,9 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
   content: { flexGrow: 1, justifyContent: 'center', padding: 24, gap: 12 },
-  title: { fontSize: 28, fontWeight: '700', color: colors.text, textAlign: 'center' },
+  // Actual wordmark asset is 1296x290 (~4.47:1) — width fixed, height derived
+  // from that ratio so it can't be stretched out of proportion.
+  logo: { width: 240, height: 240 / (1296 / 290), alignSelf: 'center', marginBottom: 4 },
   subtitle: {
     fontSize: 14,
     color: colors.textMuted,
