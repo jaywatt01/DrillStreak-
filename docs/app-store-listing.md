@@ -39,16 +39,19 @@ Coach features are free permanently — they always will be.
 basketball,training,drills,coach,streak,accountability,youth sports,workout,team,roster
 
 ## Support URL
-https://jaywatt01.github.io/DrillStreak-/support.html (live once GitHub Pages is enabled — see below. Lists jaywatt01@gmail.com as the support contact, closing that open placeholder too.)
+https://jaywatt01.github.io/drillstreak-legal/support.html (lists jaywatt01@gmail.com as the support contact, closing that open placeholder too)
 
 ## Marketing URL
 (optional — skip until the domain is purchased, per DRILLSTREAK.md blocker #2)
 
 ## Privacy Policy URL
-https://jaywatt01.github.io/DrillStreak-/legal/privacy-policy.html (live once GitHub Pages is enabled — see below)
+https://jaywatt01.github.io/drillstreak-legal/legal/privacy-policy.html
 
 ## Terms of Service URL (App Store Connect calls this the EULA field, optional but recommended)
-https://jaywatt01.github.io/DrillStreak-/legal/terms-of-service.html
+https://jaywatt01.github.io/drillstreak-legal/legal/terms-of-service.html
+
+---
+**Note (2026-07-26):** these are hosted from a separate small public repo, `jaywatt01/drillstreak-legal`, not the main app repo — `DrillStreak-` stayed private (GitHub Pages requires a public repo on the free plan, and making the actual app source public would have exposed the full RLS/paywall/business logic before launch). Keep the two repos' copies in sync — if the legal docs change here, copy the same edit to `jaywatt01/drillstreak-legal`.
 
 ## Age rating self-assessment
 Recommend: **4+**, all content descriptors "None" — no violence/mature themes/gambling/web access/user-generated content beyond player display names. Not enrolling in Apple's "Kids Category" — the app's primary account holder is an adult (coach/parent) who signs in and manages the child's profile, not a child using the app independently, so the stricter Kids Category requirements don't fit and aren't required. Worth a final gut-check against Apple's actual questionnaire when you're in App Store Connect, since the exact wording of the questions can shift.
