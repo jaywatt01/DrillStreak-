@@ -61,24 +61,20 @@ Parent membership, $4.99/month, auto-renewing subscription. Apple's review guide
 
 ---
 
-## Hosting the legal docs (needed before submission, not before writing the rest of this listing)
-No domain is purchased yet, so the fastest real fix is GitHub Pages on the existing repo — free, and swappable to a real domain later without changing the listing (Apple just needs *a* stable URL, not a *final* one).
+## Hosting the legal docs — done (2026-07-26)
+GitHub Pages requires a public repo, and making the actual `DrillStreak-` app repo public would have exposed the full source (RLS, paywall, business logic) before launch — Jay also hit a real "visibility couldn't be changed" error trying it directly. Resolved instead with a separate, minimal public repo containing only the static pages: `jaywatt01/drillstreak-legal`. Live and confirmed:
+- `https://jaywatt01.github.io/drillstreak-legal/legal/privacy-policy.html`
+- `https://jaywatt01.github.io/drillstreak-legal/legal/terms-of-service.html`
+- `https://jaywatt01.github.io/drillstreak-legal/support.html`
 
-1. On github.com, go to `jaywatt01/DrillStreak-` → **Settings** → **Pages** (left sidebar).
-2. Under "Build and deployment," set **Source: Deploy from a branch**, **Branch: main**, folder **/(root)**. Save.
-3. GitHub builds it (~1 minute). The docs will land at:
-   - `https://jaywatt01.github.io/DrillStreak-/legal/privacy-policy.html`
-   - `https://jaywatt01.github.io/DrillStreak-/legal/terms-of-service.html`
-4. Once your lawyer signs off on final wording, just push the edited HTML to `main` again — same URL, no App Store Connect changes needed.
+Once the lawyer signs off on final wording, push the edited HTML to both `DrillStreak-` (source of truth) and `drillstreak-legal` (what's actually served) — same URLs, no App Store Connect changes needed.
 
-## Screenshots — needs your phone, can't be done from here
-Apple requires real screenshots of the actual native app (6.7" display size at minimum), and there's no substitute for that from this sandbox — a headless-browser render of the Expo web preview would show React-Native-Web's layout, not the real iOS native rendering, and wouldn't match Apple's required pixel dimensions. This is the one piece of Step 3 that has to wait for you.
+## Screenshots — done (2026-07-26)
+5 real screenshots captured on Jay's own phone via the dev-client build, saved at `docs/screenshots/` in this repo:
+1. `01-today.png` — one drill done ("Cone weave dribbling"), one pending ("Crossover series"), streak showing.
+2. `02-my-team.png` — Huskies team, invite code visible, roster shown.
+3. `03-add-a-player.png` — join-a-team-by-invite-code view, with the "Joined the team!" confirmation showing.
+4. `04-progress.png` — clean single-entry-per-day history (confirms the duplicate-completions fix held).
+5. `05-account.png` — both tier cards, Coach (free) and Parent ($4.99/mo).
 
-Shot list (5, one per tab), captured on your own phone in the dev-client build:
-1. **Today** — with at least one drill marked done and one still pending, so the streak counter and both states show.
-2. **My Team** — roster visible with your real team and invite code.
-3. **Add a Player** — the join-by-invite-code view.
-4. **Progress** — after the SQL cleanup, a clean single-entry-per-day history.
-5. **Account** — the real tier cards (Coach free / Parent $4.99).
-
-Standard iOS screenshot (side button + volume up) is fine — Apple's upload tool accepts the native resolution directly.
+Upload the originals from Jay's Photos app directly into App Store Connect (not the copies in this repo, which may be recompressed from the upload pipeline) — App Store Connect validates resolution on upload and will flag it immediately if a device-size category doesn't match.
