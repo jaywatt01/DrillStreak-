@@ -105,7 +105,13 @@ create table completions (
   drill_id uuid not null references drills(id),
   date date not null default current_date,
   note text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Added 2026-07-26 after a real bug: the Home screen let an
+  -- already-marked-done drill be tapped again, inserting a duplicate row
+  -- every time (caught by Jay seeing the same drill 4x on one day in
+  -- Progress). This is the data-layer backstop; the UI fix disables the
+  -- button once done, this stops races/retries/direct-API duplicates.
+  unique (player_id, drill_id, date)
 );
 
 -- ---------------------------------------------------------------------------
@@ -240,10 +246,19 @@ create policy completions_owner_access on completions
   for all
   using (is_player_owner_or_guardian(completions.player_id, auth.uid()));
 
+-- Restricted to the current week (2026-07-26). Coach role is free forever
+-- by design, but this policy previously had no date bound at all, so a
+-- parent could self-coach their own kid and read that kid's FULL history
+-- straight from the API, bypassing the $4.99/mo parent_tier history
+-- paywall entirely at the data layer. The app's own My Team screen never
+-- asks for more than the current week (getRosterCompletionsThisWeek), so
+-- this matches existing product behavior exactly — no legitimate feature
+-- relied on a coach reading further back than this.
 create policy completions_coach_read on completions
   for select
   using (
-    exists (
+    completions.date >= date_trunc('week', current_date)::date
+    and exists (
       select 1 from team_memberships tm
       join teams t on t.id = tm.team_id
       where tm.player_id = completions.player_id and t.coach_user_id = auth.uid()
@@ -351,3 +366,37 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- update drills set estimated_minutes = 5 where name = 'Crossover series, 5 min';
 -- update drills set estimated_minutes = 5 where name = 'Defensive slides, 5 min';
 -- update drills set estimated_minutes = 10 where name = 'Jump rope, 10 min';
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-07-26): dedupe testing
+-- artifacts, then add the constraint that stops future duplicates, then
+-- tighten the coach-read policy to current-week-only. Run against the live
+-- project in this order.
+-- ---------------------------------------------------------------------------
+-- -- 1. Collapse existing duplicate (player_id, drill_id, date) rows down to
+-- --    one each, keeping the earliest, before the unique constraint can be
+-- --    added (it will fail on any table that still has duplicates in it).
+-- delete from completions a using completions b
+--   where a.player_id = b.player_id
+--     and a.drill_id = b.drill_id
+--     and a.date = b.date
+--     and a.created_at > b.created_at;
+--
+-- -- 2. Stop it from happening again, at the data layer.
+-- alter table completions add constraint completions_player_drill_date_key
+--   unique (player_id, drill_id, date);
+--
+-- -- 3. Close the paywall-bypass gap: a coach could previously read a
+-- --    roster player's full completion history (not just this week)
+-- --    straight from the API, regardless of parent_tier.
+-- drop policy completions_coach_read on completions;
+-- create policy completions_coach_read on completions
+--   for select
+--   using (
+--     completions.date >= date_trunc('week', current_date)::date
+--     and exists (
+--       select 1 from team_memberships tm
+--       join teams t on t.id = tm.team_id
+--       where tm.player_id = completions.player_id and t.coach_user_id = auth.uid()
+--     )
+--   );

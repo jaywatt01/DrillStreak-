@@ -208,7 +208,7 @@ export default function HomeScreen() {
                     <Pressable
                       style={styles.drillRowMain}
                       onPress={() => handleMarkComplete(player.id, drill.id)}
-                      disabled={markingId === drill.id}
+                      disabled={markingId === drill.id || done}
                     >
                       <View style={styles.drillRowText}>
                         <Text style={styles.drillName}>{drill.name}</Text>

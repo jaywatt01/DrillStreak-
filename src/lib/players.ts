@@ -252,10 +252,17 @@ export function calculateStreak(sortedDescendingDates: string[]): number {
   return streak;
 }
 
+// Upsert with ignoreDuplicates so a double-tap, a race between two devices,
+// or a retry after a dropped network response can't create a second
+// completions row for the same player/drill/day (relies on the unique
+// constraint added in the 2026-07-26 migration at the bottom of schema.sql).
 export async function logCompletion(playerId: string, drillId: string): Promise<void> {
   const { error } = await supabase
     .from('completions')
-    .insert({ player_id: playerId, drill_id: drillId, date: todayDateString() });
+    .upsert(
+      { player_id: playerId, drill_id: drillId, date: todayDateString() },
+      { onConflict: 'player_id,drill_id,date', ignoreDuplicates: true }
+    );
   if (error) throw error;
 }
 
