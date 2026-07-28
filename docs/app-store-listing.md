@@ -39,16 +39,16 @@ Coach features are free permanently — they always will be.
 basketball,training,drills,coach,streak,accountability,youth sports,workout,team,roster
 
 ## Support URL
-https://jaywatt01.github.io/drillstreak-legal/support.html (lists jaywatt01@gmail.com as the support contact, closing that open placeholder too)
+https://legal.drillstreak.com/support.html (lists support@drillstreak.com as the support contact)
 
 ## Marketing URL
 (optional — skip until the domain is purchased, per DRILLSTREAK.md blocker #2)
 
 ## Privacy Policy URL
-https://jaywatt01.github.io/drillstreak-legal/legal/privacy-policy.html
+https://legal.drillstreak.com/legal/privacy-policy.html
 
 ## Terms of Service URL (App Store Connect calls this the EULA field, optional but recommended)
-https://jaywatt01.github.io/drillstreak-legal/legal/terms-of-service.html
+https://legal.drillstreak.com/legal/terms-of-service.html
 
 ---
 **Note (2026-07-26):** these are hosted from a separate small public repo, `jaywatt01/drillstreak-legal`, not the main app repo — `DrillStreak-` stayed private (GitHub Pages requires a public repo on the free plan, and making the actual app source public would have exposed the full RLS/paywall/business logic before launch). Keep the two repos' copies in sync — if the legal docs change here, copy the same edit to `jaywatt01/drillstreak-legal`.
@@ -63,9 +63,9 @@ Parent membership, $4.99/month, auto-renewing subscription. Apple's review guide
 
 ## Hosting the legal docs — done (2026-07-26)
 GitHub Pages requires a public repo, and making the actual `DrillStreak-` app repo public would have exposed the full source (RLS, paywall, business logic) before launch — Jay also hit a real "visibility couldn't be changed" error trying it directly. Resolved instead with a separate, minimal public repo containing only the static pages: `jaywatt01/drillstreak-legal`. Live and confirmed:
-- `https://jaywatt01.github.io/drillstreak-legal/legal/privacy-policy.html`
-- `https://jaywatt01.github.io/drillstreak-legal/legal/terms-of-service.html`
-- `https://jaywatt01.github.io/drillstreak-legal/support.html`
+- `https://legal.drillstreak.com/legal/privacy-policy.html`
+- `https://legal.drillstreak.com/legal/terms-of-service.html`
+- `https://legal.drillstreak.com/support.html`
 
 Once the lawyer signs off on final wording, push the edited HTML to both `DrillStreak-` (source of truth) and `drillstreak-legal` (what's actually served) — same URLs, no App Store Connect changes needed.
 

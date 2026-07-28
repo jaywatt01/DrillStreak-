@@ -112,14 +112,14 @@ export default function AccountScreen() {
             anytime in your device's Apple ID account settings.{' '}
             <Text
               style={styles.disclosureLink}
-              onPress={() => Linking.openURL('https://jaywatt01.github.io/drillstreak-legal/legal/terms-of-service.html')}
+              onPress={() => Linking.openURL('https://legal.drillstreak.com/legal/terms-of-service.html')}
             >
               Terms of Service
             </Text>
             {'  ·  '}
             <Text
               style={styles.disclosureLink}
-              onPress={() => Linking.openURL('https://jaywatt01.github.io/drillstreak-legal/legal/privacy-policy.html')}
+              onPress={() => Linking.openURL('https://legal.drillstreak.com/legal/privacy-policy.html')}
             >
               Privacy Policy
             </Text>
