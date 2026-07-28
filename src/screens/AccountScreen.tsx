@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import {
@@ -98,6 +98,33 @@ export default function AccountScreen() {
             )}
           </Pressable>
         ) : null}
+
+        {/* Apple App Review guideline 3.1.2 subscription disclosure —
+            required near the purchase button, only while it's showing. */}
+        {!hasParentTier && !entitlementLoading ? (
+          <Text style={styles.disclosureText}>
+            Parent Membership is a $4.99/month auto-renewing subscription.
+            Payment is charged to your Apple ID account at confirmation of
+            purchase. The subscription automatically renews unless
+            auto-renew is turned off at least 24 hours before the end of
+            the current period, and your account will be charged for
+            renewal within 24 hours prior to that. Manage or cancel
+            anytime in your device's Apple ID account settings.{' '}
+            <Text
+              style={styles.disclosureLink}
+              onPress={() => Linking.openURL('https://jaywatt01.github.io/drillstreak-legal/legal/terms-of-service.html')}
+            >
+              Terms of Service
+            </Text>
+            {'  ·  '}
+            <Text
+              style={styles.disclosureLink}
+              onPress={() => Linking.openURL('https://jaywatt01.github.io/drillstreak-legal/legal/privacy-policy.html')}
+            >
+              Privacy Policy
+            </Text>
+          </Text>
+        ) : null}
       </View>
 
       <Pressable style={styles.signOutButton} onPress={() => supabase.auth.signOut()}>
@@ -139,6 +166,8 @@ const styles = StyleSheet.create({
   buttonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   restoreLink: { alignSelf: 'center', marginTop: 10 },
   restoreLinkText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  disclosureText: { fontSize: 11, color: colors.textMuted, lineHeight: 16, marginTop: 12 },
+  disclosureLink: { color: colors.primary, fontWeight: '600' },
   signOutButton: {
     marginTop: 8,
     borderWidth: 1,
