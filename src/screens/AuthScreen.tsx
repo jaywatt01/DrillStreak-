@@ -42,7 +42,20 @@ export default function AuthScreen() {
         setSignUpMessage('Check your email to confirm your account, then sign in.');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong.');
+      // Supabase normally throws a clean, short message ("Invalid login
+      // credentials", "User already registered"), but an unexpected
+      // server-side failure (e.g. a misconfigured SMTP provider breaking
+      // the confirmation-email send) can surface as a raw stringified
+      // HTTP response instead — caught live July 29, 2026, a real user
+      // saw headers/cookies/blobIds dumped into this field. Fall back to
+      // a generic message for anything that isn't a normal short error.
+      const message = e instanceof Error ? e.message : '';
+      const looksLikeRawResponse = !message || message.length > 200 || message.startsWith('{"');
+      setError(
+        looksLikeRawResponse
+          ? 'Something went wrong. Please try again in a moment, or contact support@drillstreak.com if it keeps happening.'
+          : message
+      );
     } finally {
       setLoading(false);
     }
