@@ -38,11 +38,20 @@ export default function App() {
       if (data.session?.user.id) identifyPurchasesUser(data.session.user.id);
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       if (newSession?.user.id) {
         identifyPurchasesUser(newSession.user.id);
-      } else {
+      } else if (event === 'SIGNED_OUT') {
+        // Real bug, caught July 29, 2026, on the first-ever fresh install
+        // this identity code has run against: Supabase also fires
+        // 'INITIAL_SESSION' with session=null on every app startup before
+        // any sign-in has happened, not just on an actual sign-out. The
+        // old `else` branch called Purchases.logOut() on that startup
+        // event too — RevenueCat correctly errors on that, since nothing
+        // was ever logged in yet ("LogOut was called but the current user
+        // is anonymous"). Only clear the RevenueCat identity on a real
+        // sign-out event, never on startup with no session.
         clearPurchasesUser();
       }
     });
