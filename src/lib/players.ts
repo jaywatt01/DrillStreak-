@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { mondayOfThisWeek, todayDateString } from './date';
+import { mondayOfThisWeek, todayDateString, weekIndex } from './date';
 
 export type Player = {
   id: string;
@@ -143,6 +143,42 @@ export async function addCustomDrill(
 // whatever estimatedMinutes is set on the drill itself).
 export type WeeklyDrill = Drill & { scheduledTime: string | null; scheduledDurationMinutes: number | null };
 
+// Picks which video shows this week from a drill's candidate pool,
+// deterministically — same pick for everyone until the following Monday,
+// no stored "current index" anywhere. Pure function of the pool + the
+// current week, so it's trivially testable and never needs a migration
+// to change the cadence (see weekIndex in lib/date.ts for that).
+export function pickRotatingVideo(urls: string[]): string | null {
+  if (urls.length === 0) return null;
+  return urls[weekIndex() % urls.length];
+}
+
+// Overrides each drill's videoUrl with its rotating pick when it has a
+// video pool (drill_videos rows) — falls back to the drill's own single
+// video_url (set at custom-drill creation/rename) when it doesn't, so
+// custom drills work exactly as before, unaffected by rotation.
+async function applyVideoRotation(drills: WeeklyDrill[]): Promise<WeeklyDrill[]> {
+  const drillIds = drills.map((d) => d.id);
+  if (drillIds.length === 0) return drills;
+
+  const { data, error } = await supabase.from('drill_videos').select('drill_id, url').in('drill_id', drillIds);
+  if (error) throw error;
+
+  const poolsByDrill = new Map<string, string[]>();
+  for (const row of data ?? []) {
+    const id = row.drill_id as string;
+    const existing = poolsByDrill.get(id) ?? [];
+    existing.push(row.url as string);
+    poolsByDrill.set(id, existing);
+  }
+
+  return drills.map((drill) => {
+    const pool = poolsByDrill.get(drill.id);
+    if (!pool || pool.length === 0) return drill;
+    return { ...drill, videoUrl: pickRotatingVideo(pool) };
+  });
+}
+
 export async function getWeeklyDrills(
   playerId: string
 ): Promise<{ drills: WeeklyDrill[]; source: 'team' | 'library' }> {
@@ -178,7 +214,7 @@ export async function getWeeklyDrills(
 
     const deduped = Array.from(new Map(drills.map((d) => [d.id, d])).values());
     if (deduped.length > 0) {
-      return { drills: deduped, source: 'team' };
+      return { drills: await applyVideoRotation(deduped), source: 'team' };
     }
   }
 
@@ -189,12 +225,14 @@ export async function getWeeklyDrills(
     .order('category');
   if (libraryError) throw libraryError;
 
+  const libraryResult: WeeklyDrill[] = (libraryDrills ?? []).map((row) => ({
+    ...mapDrillRow(row),
+    scheduledTime: null,
+    scheduledDurationMinutes: null,
+  }));
+
   return {
-    drills: (libraryDrills ?? []).map((row) => ({
-      ...mapDrillRow(row),
-      scheduledTime: null,
-      scheduledDurationMinutes: null,
-    })),
+    drills: await applyVideoRotation(libraryResult),
     source: 'library',
   };
 }
