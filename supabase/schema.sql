@@ -244,6 +244,65 @@ create policy drills_delete on drills
   for delete
   using (created_by_user_id = auth.uid() and is_default = false);
 
+-- ---------------------------------------------------------------------------
+-- drill_videos: a pool of candidate videos for a drill (added 2026-07-29,
+-- same NBA-level feedback batch as drills.video_url/completions.makes -
+-- see DRILLSTREAK.md). Distinct from drills.video_url (a single link, set
+-- at custom-drill creation/rename, unaffected by this table): when a drill
+-- has rows here, the app auto-rotates which one displays instead of using
+-- the single field. Rotation itself is a pure client-side date computation
+-- (see pickRotatingVideo in src/lib/players.ts) — no cron job, no stored
+-- "current index," so this table only ever needs the actual video pool.
+-- ---------------------------------------------------------------------------
+create table drill_videos (
+  id uuid primary key default gen_random_uuid(),
+  drill_id uuid not null references drills(id) on delete cascade,
+  url text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table drill_videos enable row level security;
+
+-- Readable by anyone who can already see the parent drill — mirrors
+-- drills_select's exact visibility logic rather than re-deriving it.
+create policy drill_videos_select on drill_videos
+  for select
+  using (
+    exists (
+      select 1 from drills d
+      where d.id = drill_videos.drill_id
+      and (
+        d.is_default = true
+        or d.created_by_user_id = auth.uid()
+        or (d.player_id is not null and is_player_owner_or_guardian(d.player_id, auth.uid()))
+        or exists (
+          select 1 from assignments a
+          where a.drill_id = d.id
+          and (
+            exists (select 1 from teams t where t.id = a.team_id and t.coach_user_id = auth.uid())
+            or is_player_owner_or_guardian(a.player_id, auth.uid())
+          )
+        )
+      )
+    )
+  );
+
+-- Writable only by whoever owns the parent custom drill (mirrors
+-- drills_update) — no app UI uses this yet (Jay populates via SQL for now,
+-- same workflow as the default-drill video URLs), but this keeps the door
+-- open for a coach to manage their own custom drill's video pool later
+-- without a schema change.
+create policy drill_videos_write on drill_videos
+  for all
+  using (
+    exists (
+      select 1 from drills d
+      where d.id = drill_videos.drill_id
+      and d.created_by_user_id = auth.uid()
+      and d.is_default = false
+    )
+  );
+
 -- assignments: coach manages team assignments; guardian/player manages
 -- their own individual (non-team) assignments
 create policy assignments_access on assignments
@@ -425,3 +484,50 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- alter table drills add column video_url text;
 -- alter table completions add column makes integer;
 -- alter table completions add column attempts integer;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-07-29, second batch):
+-- the rotating drill-video pool table. Run against the live project after
+-- the video_url/makes/attempts migration above.
+-- ---------------------------------------------------------------------------
+-- create table drill_videos (
+--   id uuid primary key default gen_random_uuid(),
+--   drill_id uuid not null references drills(id) on delete cascade,
+--   url text not null,
+--   created_at timestamptz not null default now()
+-- );
+--
+-- alter table drill_videos enable row level security;
+--
+-- create policy drill_videos_select on drill_videos
+--   for select
+--   using (
+--     exists (
+--       select 1 from drills d
+--       where d.id = drill_videos.drill_id
+--       and (
+--         d.is_default = true
+--         or d.created_by_user_id = auth.uid()
+--         or (d.player_id is not null and is_player_owner_or_guardian(d.player_id, auth.uid()))
+--         or exists (
+--           select 1 from assignments a
+--           where a.drill_id = d.id
+--           and (
+--             exists (select 1 from teams t where t.id = a.team_id and t.coach_user_id = auth.uid())
+--             or is_player_owner_or_guardian(a.player_id, auth.uid())
+--           )
+--         )
+--       )
+--     )
+--   );
+--
+-- create policy drill_videos_write on drill_videos
+--   for all
+--   using (
+--     exists (
+--       select 1 from drills d
+--       where d.id = drill_videos.drill_id
+--       and d.created_by_user_id = auth.uid()
+--       and d.is_default = false
+--     )
+--   );
