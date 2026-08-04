@@ -30,6 +30,7 @@ import {
   WeeklyDrill,
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
+import { getPromptForResultsForPlayer } from '../lib/team';
 
 type PlayerCardData = {
   player: Player;
@@ -37,6 +38,7 @@ type PlayerCardData = {
   source: 'team' | 'library';
   streak: number;
   completedToday: Map<string, DrillResult>;
+  promptForResults: boolean;
 };
 
 // "8/10" if both are set, "8 reps" if just a rep count was logged, null
@@ -81,10 +83,11 @@ export default function HomeScreen() {
       const players = await listMyPlayers();
       const cardData = await Promise.all(
         players.map(async (player) => {
-          const [{ drills, source }, dates, completedToday] = await Promise.all([
+          const [{ drills, source }, dates, completedToday, promptForResults] = await Promise.all([
             getWeeklyDrills(player.id),
             getCompletionDates(player.id),
             getTodayCompletions(player.id),
+            getPromptForResultsForPlayer(player.id),
           ]);
           return {
             player,
@@ -92,6 +95,7 @@ export default function HomeScreen() {
             source,
             streak: calculateStreak(dates),
             completedToday,
+            promptForResults,
           };
         })
       );
@@ -113,12 +117,18 @@ export default function HomeScreen() {
     load();
   };
 
-  const handleMarkComplete = async (playerId: string, drillId: string) => {
-    setMarkingId(drillId);
+  const handleMarkComplete = async (playerId: string, drill: WeeklyDrill, promptForResults: boolean) => {
+    setMarkingId(drill.id);
     setError(null);
     try {
-      await logCompletion(playerId, drillId);
+      await logCompletion(playerId, drill.id);
       await load();
+      // Coach-level nudge, not a gate: open the result modal automatically
+      // so logging a result takes one tap instead of two, but it's still
+      // just as skippable via Cancel as tapping the chart icon manually.
+      if (promptForResults) {
+        openResultLogger(playerId, drill, undefined);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to log completion.');
     } finally {
@@ -226,7 +236,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       ) : (
-        cards.map(({ player, drills, source, streak, completedToday }) => (
+        cards.map(({ player, drills, source, streak, completedToday, promptForResults }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
 
@@ -251,7 +261,7 @@ export default function HomeScreen() {
                   <View key={drill.id} style={[styles.drillRow, done && styles.drillRowDone]}>
                     <Pressable
                       style={styles.drillRowMain}
-                      onPress={() => handleMarkComplete(player.id, drill.id)}
+                      onPress={() => handleMarkComplete(player.id, drill, promptForResults)}
                       disabled={markingId === drill.id || done}
                     >
                       <View style={styles.drillRowText}>
