@@ -421,10 +421,7 @@ export default function AddPlayerScreen() {
       <Text style={styles.placeholder}>
         {players.length === 0
           ? 'Add a player above first.'
-          : `Adds to ${
-              players.find((p) => p.id === selectedPlayerId)?.display_name ?? 'the selected player'
-            }'s drill library only — no limit on how many. Long-press a
-              drill below to rename or delete it.`}
+          : `Adds to ${players.find((p) => p.id === selectedPlayerId)?.display_name ?? 'the selected player'}'s drill library only — no limit on how many. Long-press a drill below to rename or delete it.`}
       </Text>
       {drillError ? <Text style={styles.error}>{drillError}</Text> : null}
       {drillSuccess ? <Text style={styles.success}>{drillSuccess}</Text> : null}
