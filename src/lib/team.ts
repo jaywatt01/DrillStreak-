@@ -181,16 +181,20 @@ export async function joinTeamByInviteCode(inviteCode: string, playerId: string)
 // True if any team this player belongs to has the result-prompt nudge on.
 // A player on multiple teams with mixed settings gets prompted — safer to
 // over-prompt (still skippable) than silently ignore one coach's setting.
+//
+// Goes through the player_has_prompt_for_results RPC rather than a direct
+// embedded select, because teams RLS intentionally restricts SELECT on
+// `teams` to the owning coach (to keep invite codes private) — a
+// player-side `team_memberships -> teams(prompt_for_results)` embed
+// silently comes back null for every non-coach caller, which is why the
+// auto-popup never fired for real players even with the toggle on. The RPC
+// bypasses that restriction for this one boolean while re-verifying the
+// caller owns/guards this player, so it can't be used to probe other
+// players' teams.
 export async function getPromptForResultsForPlayer(playerId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('team_memberships')
-    .select('teams(prompt_for_results)')
-    .eq('player_id', playerId);
+  const { data, error } = await supabase.rpc('player_has_prompt_for_results', { p_player_id: playerId });
   if (error) throw error;
-  return (data ?? []).some((row) => {
-    const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
-    return team?.prompt_for_results === true;
-  });
+  return data === true;
 }
 
 export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): Promise<RosterCompletion[]> {

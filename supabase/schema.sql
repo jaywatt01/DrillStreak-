@@ -204,6 +204,38 @@ revoke all on function is_player_owner_or_guardian(uuid, uuid) from public;
 revoke all on function is_player_owner_or_guardian(uuid, uuid) from anon;
 grant execute on function is_player_owner_or_guardian(uuid, uuid) to authenticated;
 
+-- player_has_prompt_for_results: security-definer helper, same reason as
+-- is_player_owner_or_guardian above but for a different recursion-shaped
+-- problem. teams_coach_access (below) intentionally restricts SELECT on
+-- teams to the owning coach only (protects invite codes). That means a
+-- player-side embedded select of `team_memberships -> teams(prompt_for_results)`
+-- silently comes back null for every non-coach caller — RLS doesn't error,
+-- it just omits the nested row — so the coach's result-prompt toggle never
+-- actually reached the player's app. This function bypasses teams RLS
+-- internally but re-checks ownership itself, so it can't be used to probe
+-- any player/team other than one the caller actually owns or guards.
+create or replace function player_has_prompt_for_results(p_player_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    is_player_owner_or_guardian(p_player_id, auth.uid())
+    and exists (
+      select 1
+      from team_memberships tm
+      join teams t on t.id = tm.team_id
+      where tm.player_id = p_player_id
+        and t.prompt_for_results = true
+    );
+$$;
+
+revoke all on function player_has_prompt_for_results(uuid) from public;
+revoke all on function player_has_prompt_for_results(uuid) from anon;
+grant execute on function player_has_prompt_for_results(uuid) to authenticated;
+
 create policy team_memberships_access on team_memberships
   for all
   using (
@@ -547,3 +579,37 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- teams_coach_access policy (same rows, new column) — no new policy needed.
 -- ---------------------------------------------------------------------------
 -- alter table teams add column prompt_for_results boolean not null default false;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-04): fix a real bug
+-- where the coach's result-prompt toggle never reached players. teams_coach_
+-- access restricts SELECT on teams to the owning coach (protects invite
+-- codes), so the player-side embedded select of
+-- `team_memberships -> teams(prompt_for_results)` silently returned null for
+-- every non-coach caller. This adds a security-definer function that
+-- bypasses that restriction for this one boolean while re-checking the
+-- caller actually owns/guards the player, mirroring is_player_owner_or_
+-- guardian's existing pattern. Run against the live project, then no app
+-- redeploy is needed beyond the already-shipped client change that calls it.
+-- ---------------------------------------------------------------------------
+-- create or replace function player_has_prompt_for_results(p_player_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     is_player_owner_or_guardian(p_player_id, auth.uid())
+--     and exists (
+--       select 1
+--       from team_memberships tm
+--       join teams t on t.id = tm.team_id
+--       where tm.player_id = p_player_id
+--         and t.prompt_for_results = true
+--     );
+-- $$;
+--
+-- revoke all on function player_has_prompt_for_results(uuid) from public;
+-- revoke all on function player_has_prompt_for_results(uuid) from anon;
+-- grant execute on function player_has_prompt_for_results(uuid) to authenticated;
