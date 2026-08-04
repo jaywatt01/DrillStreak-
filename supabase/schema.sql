@@ -43,7 +43,16 @@ create table teams (
   coach_user_id uuid not null references auth.users(id),
   name text not null,
   invite_code text not null unique default substr(md5(random()::text), 1, 8),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Added 2026-07-29, from Rylee's idea via the same feedback batch as
+  -- makes/attempts: a coach-level nudge, not an enforcement gate. When on,
+  -- marking a team-assigned drill done auto-opens the result-logging modal
+  -- instead of requiring a second tap — still fully skippable. Deliberately
+  -- NOT a hard requirement to mark a drill done: a mandatory gate with no
+  -- verification doesn't make self-reported data more honest, it just
+  -- makes skipping it look like a fabricated number instead of an honest
+  -- blank. Default false so existing teams' behavior doesn't silently change.
+  prompt_for_results boolean not null default false
 );
 
 create table team_memberships (
@@ -531,3 +540,10 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       and d.is_default = false
 --     )
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-07-29, third batch):
+-- the coach-level result-prompt nudge. Covered by the existing
+-- teams_coach_access policy (same rows, new column) — no new policy needed.
+-- ---------------------------------------------------------------------------
+-- alter table teams add column prompt_for_results boolean not null default false;

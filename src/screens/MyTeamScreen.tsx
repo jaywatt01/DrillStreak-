@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -29,6 +30,7 @@ import {
   renameTeam,
   RosterCompletion,
   RosterPlayer,
+  setPromptForResults,
   Team,
   unassignDrill,
   updateAssignmentSchedule,
@@ -179,6 +181,17 @@ export default function MyTeamScreen() {
       setError(e instanceof Error ? e.message : 'Failed to rename team.');
     } finally {
       setSavingTeamEdit(false);
+    }
+  };
+
+  const handleTogglePromptForResults = async (value: boolean) => {
+    if (!team) return;
+    setTeam({ ...team, prompt_for_results: value }); // optimistic — instant toggle feel
+    try {
+      await setPromptForResults(team.id, value);
+    } catch (e) {
+      setTeam({ ...team, prompt_for_results: !value }); // revert on failure
+      setError(e instanceof Error ? e.message : 'Failed to update setting.');
     }
   };
 
@@ -350,6 +363,22 @@ export default function MyTeamScreen() {
               more of them who join, the more accountability data you see on
               your own roster activity feed below, at no cost to you.
             </Text>
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingText}>
+              <Text style={styles.settingLabel}>Prompt for makes/attempts</Text>
+              <Text style={styles.settingBody}>
+                When a player marks a drill done, open the result box
+                automatically instead of requiring an extra tap. Still
+                optional to fill in either way.
+              </Text>
+            </View>
+            <Switch
+              value={team.prompt_for_results}
+              onValueChange={handleTogglePromptForResults}
+              trackColor={{ true: colors.primary }}
+            />
           </View>
 
           <Text style={styles.sectionTitle}>Roster ({roster.length})</Text>
@@ -537,6 +566,19 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   invitePlaceholder: { color: '#FFFFFF', fontSize: 12, opacity: 0.85, marginTop: 4 },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: colors.surface,
+    gap: 12,
+  },
+  settingText: { flex: 1, gap: 2 },
+  settingLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
+  settingBody: { fontSize: 12, color: colors.textMuted, lineHeight: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginTop: 8 },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   input: {

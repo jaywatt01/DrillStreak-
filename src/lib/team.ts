@@ -6,6 +6,7 @@ export type Team = {
   id: string;
   name: string;
   invite_code: string;
+  prompt_for_results: boolean;
 };
 
 export type RosterPlayer = {
@@ -34,7 +35,7 @@ export async function getMyTeam(): Promise<Team | null> {
 
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, invite_code')
+    .select('id, name, invite_code, prompt_for_results')
     .eq('coach_user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
@@ -51,10 +52,19 @@ export async function createTeam(name: string): Promise<Team> {
   const { data, error } = await supabase
     .from('teams')
     .insert({ name, coach_user_id: userId })
-    .select('id, name, invite_code')
+    .select('id, name, invite_code, prompt_for_results')
     .single();
   if (error) throw error;
   return data as Team;
+}
+
+// Coach-level nudge (see schema.sql for the full reasoning): when on, a
+// player marking a team-assigned drill done gets the result-logging modal
+// opened automatically instead of needing a second tap. Still skippable —
+// this is a default, not a requirement to mark the drill done at all.
+export async function setPromptForResults(teamId: string, value: boolean): Promise<void> {
+  const { error } = await supabase.from('teams').update({ prompt_for_results: value }).eq('id', teamId);
+  if (error) throw error;
 }
 
 export async function getRoster(teamId: string): Promise<RosterPlayer[]> {
@@ -166,6 +176,21 @@ export async function joinTeamByInviteCode(inviteCode: string, playerId: string)
     p_player_id: playerId,
   });
   if (error) throw error;
+}
+
+// True if any team this player belongs to has the result-prompt nudge on.
+// A player on multiple teams with mixed settings gets prompted — safer to
+// over-prompt (still skippable) than silently ignore one coach's setting.
+export async function getPromptForResultsForPlayer(playerId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('team_memberships')
+    .select('teams(prompt_for_results)')
+    .eq('player_id', playerId);
+  if (error) throw error;
+  return (data ?? []).some((row) => {
+    const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
+    return team?.prompt_for_results === true;
+  });
 }
 
 export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): Promise<RosterCompletion[]> {
