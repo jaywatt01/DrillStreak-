@@ -52,6 +52,7 @@ export default function AddPlayerScreen() {
   const [drillName, setDrillName] = useState('');
   const [drillCategory, setDrillCategory] = useState('');
   const [drillMinutes, setDrillMinutes] = useState('');
+  const [drillVideoUrl, setDrillVideoUrl] = useState('');
   const [addingDrill, setAddingDrill] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
   const [drillSuccess, setDrillSuccess] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export default function AddPlayerScreen() {
   const [renamingDrillId, setRenamingDrillId] = useState<string | null>(null);
   const [renameDrillName, setRenameDrillName] = useState('');
   const [renameDrillCategory, setRenameDrillCategory] = useState('');
+  const [renameDrillVideoUrl, setRenameDrillVideoUrl] = useState('');
   const [savingDrillEdit, setSavingDrillEdit] = useState(false);
 
   const load = useCallback(async () => {
@@ -213,11 +215,13 @@ export default function AddPlayerScreen() {
         drillName.trim(),
         drillCategory.trim(),
         selectedPlayerId,
-        estimatedMinutes
+        estimatedMinutes,
+        drillVideoUrl.trim() || null
       );
       setDrillName('');
       setDrillCategory('');
       setDrillMinutes('');
+      setDrillVideoUrl('');
       const playerName = players.find((p) => p.id === selectedPlayerId)?.display_name;
       setDrillSuccess(`Added "${drill.name}" to ${playerName ?? 'their'}'s drill library.`);
       await loadCustomDrills(selectedPlayerId);
@@ -236,6 +240,7 @@ export default function AddPlayerScreen() {
           setRenamingDrillId(drill.id);
           setRenameDrillName(drill.name);
           setRenameDrillCategory(drill.category ?? '');
+          setRenameDrillVideoUrl(drill.videoUrl ?? '');
         },
       },
       {
@@ -268,7 +273,12 @@ export default function AddPlayerScreen() {
     setSavingDrillEdit(true);
     setDrillError(null);
     try {
-      await renameDrill(renamingDrillId, renameDrillName.trim(), renameDrillCategory.trim());
+      await renameDrill(
+        renamingDrillId,
+        renameDrillName.trim(),
+        renameDrillCategory.trim(),
+        renameDrillVideoUrl.trim()
+      );
       setRenamingDrillId(null);
       if (selectedPlayerId) await loadCustomDrills(selectedPlayerId);
     } catch (e) {
@@ -445,6 +455,15 @@ export default function AddPlayerScreen() {
             placeholder="Category (optional)"
             placeholderTextColor={colors.textMuted}
           />
+          <TextInput
+            style={styles.input}
+            value={renameDrillVideoUrl}
+            onChangeText={setRenameDrillVideoUrl}
+            placeholder="YouTube video URL (optional)"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+            keyboardType="url"
+          />
           <View style={styles.editButtonRow}>
             <Pressable
               style={[styles.smallButton, styles.smallButtonSecondary]}
@@ -491,6 +510,15 @@ export default function AddPlayerScreen() {
         keyboardType="number-pad"
         value={drillMinutes}
         onChangeText={setDrillMinutes}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="YouTube video URL (optional)"
+        placeholderTextColor={colors.textMuted}
+        autoCapitalize="none"
+        keyboardType="url"
+        value={drillVideoUrl}
+        onChangeText={setDrillVideoUrl}
       />
       <Pressable
         style={[

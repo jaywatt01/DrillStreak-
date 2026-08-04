@@ -102,7 +102,19 @@ export default function ProgressScreen() {
               visibleHistory.map((entry) => (
                 <View key={entry.date} style={styles.historyRow}>
                   <Text style={styles.historyDate}>{entry.date}</Text>
-                  <Text style={styles.historyDrills}>{entry.drillNames.join(', ')}</Text>
+                  <Text style={styles.historyDrills}>
+                    {entry.drills
+                      .map((d) => {
+                        const result =
+                          d.makes != null && d.attempts != null
+                            ? `${d.makes}/${d.attempts}`
+                            : d.attempts != null
+                              ? `${d.attempts} reps`
+                              : null;
+                        return result ? `${d.name} (${result})` : d.name;
+                      })
+                      .join(', ')}
+                  </Text>
                 </View>
               ))
             )}
