@@ -74,7 +74,13 @@ create table drills (
   -- Estimated length of the drill, in minutes. Null for anything without a
   -- set duration (most reps-based drills) — the app falls back to a 30-min
   -- default at add-to-calendar time rather than a fabricated per-drill guess.
-  estimated_minutes integer
+  estimated_minutes integer,
+  -- Added 2026-07-29, from real NBA-level product feedback (Chris Hines,
+  -- Minnesota Timberwolves — see DRILLSTREAK.md): a link to a demo video
+  -- for the drill. Optional, settable at custom-drill creation/rename;
+  -- the 10 seeded defaults start null (never fabricate a YouTube URL —
+  -- Jay adds real ones directly via SQL once he has them).
+  video_url text
 );
 
 -- ---------------------------------------------------------------------------
@@ -111,7 +117,15 @@ create table completions (
   -- every time (caught by Jay seeing the same drill 4x on one day in
   -- Progress). This is the data-layer backstop; the UI fix disables the
   -- button once done, this stops races/retries/direct-API duplicates.
-  unique (player_id, drill_id, date)
+  unique (player_id, drill_id, date),
+  -- Added 2026-07-29, from the same NBA-level feedback as drills.video_url:
+  -- an optional numeric result attached to a completion — makes/attempts
+  -- for a shooting drill, or just `attempts` alone as a generic rep count
+  -- for anything else (e.g. "did 8 suicides" -> attempts=8, makes=null).
+  -- Both null by default; logging a result is optional, same trust model
+  -- as completions themselves (100% self-reported, no verification).
+  makes integer,
+  attempts integer
 );
 
 -- ---------------------------------------------------------------------------
@@ -400,3 +414,14 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       where tm.player_id = completions.player_id and t.coach_user_id = auth.uid()
 --     )
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-07-29): add the drill
+-- results (makes/attempts) and drill video-link columns. Both nullable,
+-- both covered by existing RLS policies (same rows, new columns, same
+-- pattern as the 2026-07-24 duration/schedule migration) — no new policy
+-- needed.
+-- ---------------------------------------------------------------------------
+-- alter table drills add column video_url text;
+-- alter table completions add column makes integer;
+-- alter table completions add column attempts integer;

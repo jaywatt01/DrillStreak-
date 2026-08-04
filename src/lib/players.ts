@@ -16,11 +16,12 @@ export type Drill = {
   name: string;
   category: string | null;
   estimatedMinutes: number | null;
+  videoUrl: string | null;
 };
 
 export type CustomDrill = Drill & { is_default: boolean };
 
-export const DRILL_SELECT_COLUMNS = 'id, name, category, estimated_minutes';
+export const DRILL_SELECT_COLUMNS = 'id, name, category, estimated_minutes, video_url';
 
 // Maps a raw `drills` row (snake_case, as returned by supabase-js) to the
 // camelCase Drill shape used throughout the app.
@@ -29,12 +30,14 @@ export function mapDrillRow(row: {
   name: string;
   category: string | null;
   estimated_minutes: number | null;
+  video_url: string | null;
 }): Drill {
   return {
     id: row.id,
     name: row.name,
     category: row.category,
     estimatedMinutes: row.estimated_minutes,
+    videoUrl: row.video_url,
   };
 }
 
@@ -81,10 +84,15 @@ export async function getMyCustomDrills(playerId: string): Promise<CustomDrill[]
   return (data ?? []).map((row) => ({ ...mapDrillRow(row), is_default: row.is_default as boolean }));
 }
 
-export async function renameDrill(drillId: string, name: string, category: string): Promise<void> {
+export async function renameDrill(
+  drillId: string,
+  name: string,
+  category: string,
+  videoUrl: string
+): Promise<void> {
   const { error } = await supabase
     .from('drills')
-    .update({ name, category: category.trim() || null })
+    .update({ name, category: category.trim() || null, video_url: videoUrl.trim() || null })
     .eq('id', drillId);
   if (error) throw error;
 }
@@ -105,7 +113,8 @@ export async function addCustomDrill(
   name: string,
   category: string,
   playerId: string,
-  estimatedMinutes: number | null
+  estimatedMinutes: number | null,
+  videoUrl: string | null
 ): Promise<Drill> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
@@ -120,6 +129,7 @@ export async function addCustomDrill(
       player_id: playerId,
       is_default: false,
       estimated_minutes: estimatedMinutes,
+      video_url: videoUrl,
     })
     .select(DRILL_SELECT_COLUMNS)
     .single();
@@ -189,7 +199,8 @@ export async function getWeeklyDrills(
   };
 }
 
-export type CompletionHistoryEntry = { date: string; drillNames: string[] };
+export type CompletionHistoryDrill = { name: string; makes: number | null; attempts: number | null };
+export type CompletionHistoryEntry = { date: string; drills: CompletionHistoryDrill[] };
 
 // Full logged history for a player, most recent day first, each day's
 // drills grouped together. Gating (current-week-only for free users) is
@@ -198,21 +209,25 @@ export type CompletionHistoryEntry = { date: string; drillNames: string[] };
 export async function getCompletionHistory(playerId: string): Promise<CompletionHistoryEntry[]> {
   const { data, error } = await supabase
     .from('completions')
-    .select('date, drills(name)')
+    .select('date, makes, attempts, drills(name)')
     .eq('player_id', playerId)
     .order('date', { ascending: false });
   if (error) throw error;
 
-  const byDate = new Map<string, string[]>();
+  const byDate = new Map<string, CompletionHistoryDrill[]>();
   for (const row of data ?? []) {
     const drill = Array.isArray(row.drills) ? row.drills[0] : row.drills;
     if (!drill) continue;
     const date = row.date as string;
     const existing = byDate.get(date) ?? [];
-    existing.push(drill.name as string);
+    existing.push({
+      name: drill.name as string,
+      makes: row.makes as number | null,
+      attempts: row.attempts as number | null,
+    });
     byDate.set(date, existing);
   }
-  return Array.from(byDate.entries()).map(([date, drillNames]) => ({ date, drillNames }));
+  return Array.from(byDate.entries()).map(([date, drills]) => ({ date, drills }));
 }
 
 export async function getCompletionDates(playerId: string): Promise<string[]> {
@@ -266,12 +281,40 @@ export async function logCompletion(playerId: string, drillId: string): Promise<
   if (error) throw error;
 }
 
-export async function getTodayCompletedDrillIds(playerId: string): Promise<Set<string>> {
+export type DrillResult = { makes: number | null; attempts: number | null };
+
+// Keyed by drill_id, so callers can both check "is this drill done today"
+// (Map.has, same as the old Set) and read any result already logged for it.
+export async function getTodayCompletions(playerId: string): Promise<Map<string, DrillResult>> {
   const { data, error } = await supabase
     .from('completions')
-    .select('drill_id')
+    .select('drill_id, makes, attempts')
     .eq('player_id', playerId)
     .eq('date', todayDateString());
   if (error) throw error;
-  return new Set((data ?? []).map((c) => c.drill_id as string));
+  return new Map(
+    (data ?? []).map((c) => [
+      c.drill_id as string,
+      { makes: c.makes as number | null, attempts: c.attempts as number | null },
+    ])
+  );
+}
+
+// Attaches an optional numeric result to today's already-logged completion
+// for this drill (makes/attempts for shooting, or just `attempts` alone as
+// a generic rep count for anything else). The completions row must already
+// exist — call after logCompletion, not instead of it.
+export async function logDrillResult(
+  playerId: string,
+  drillId: string,
+  makes: number | null,
+  attempts: number | null
+): Promise<void> {
+  const { error } = await supabase
+    .from('completions')
+    .update({ makes, attempts })
+    .eq('player_id', playerId)
+    .eq('drill_id', drillId)
+    .eq('date', todayDateString());
+  if (error) throw error;
 }

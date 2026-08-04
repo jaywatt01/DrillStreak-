@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -18,11 +19,13 @@ import { colors } from '../theme/colors';
 import {
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
+  DrillResult,
   getCompletionDates,
-  getTodayCompletedDrillIds,
+  getTodayCompletions,
   getWeeklyDrills,
   listMyPlayers,
   logCompletion,
+  logDrillResult,
   Player,
   WeeklyDrill,
 } from '../lib/players';
@@ -33,8 +36,17 @@ type PlayerCardData = {
   drills: WeeklyDrill[];
   source: 'team' | 'library';
   streak: number;
-  completedToday: Set<string>;
+  completedToday: Map<string, DrillResult>;
 };
+
+// "8/10" if both are set, "8 reps" if just a rep count was logged, null
+// if no result was logged for this completion at all.
+function formatResult(result: DrillResult | undefined): string | null {
+  if (!result) return null;
+  if (result.makes != null && result.attempts != null) return `${result.makes}/${result.attempts}`;
+  if (result.attempts != null) return `${result.attempts} reps`;
+  return null;
+}
 
 // Parses a Postgres `time` column value ("HH:MM:SS") onto today's date.
 // Falls back to the current time if the drill has no coach-set schedule.
@@ -58,6 +70,10 @@ export default function HomeScreen() {
   const [schedulingFor, setSchedulingFor] = useState<WeeklyDrill | null>(null);
   const [pickerTime, setPickerTime] = useState(new Date());
   const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
+  const [loggingResultFor, setLoggingResultFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
+  const [resultMakes, setResultMakes] = useState('');
+  const [resultAttempts, setResultAttempts] = useState('');
+  const [savingResult, setSavingResult] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -68,7 +84,7 @@ export default function HomeScreen() {
           const [{ drills, source }, dates, completedToday] = await Promise.all([
             getWeeklyDrills(player.id),
             getCompletionDates(player.id),
-            getTodayCompletedDrillIds(player.id),
+            getTodayCompletions(player.id),
           ]);
           return {
             player,
@@ -107,6 +123,33 @@ export default function HomeScreen() {
       setError(e instanceof Error ? e.message : 'Failed to log completion.');
     } finally {
       setMarkingId(null);
+    }
+  };
+
+  const openResultLogger = (playerId: string, drill: WeeklyDrill, existing: DrillResult | undefined) => {
+    setResultMakes(existing?.makes != null ? String(existing.makes) : '');
+    setResultAttempts(existing?.attempts != null ? String(existing.attempts) : '');
+    setLoggingResultFor({ playerId, drill });
+  };
+
+  const handleSaveResult = async () => {
+    if (!loggingResultFor) return;
+    const makes = resultMakes.trim() ? parseInt(resultMakes, 10) : null;
+    const attempts = resultAttempts.trim() ? parseInt(resultAttempts, 10) : null;
+    const invalid = (raw: string, parsed: number | null) => raw.trim() && (!Number.isFinite(parsed) || (parsed as number) < 0);
+    if (invalid(resultMakes, makes) || invalid(resultAttempts, attempts)) {
+      Alert.alert('Invalid number', 'Makes and attempts must be zero or a positive number.');
+      return;
+    }
+    setSavingResult(true);
+    try {
+      await logDrillResult(loggingResultFor.playerId, loggingResultFor.drill.id, makes, attempts);
+      setLoggingResultFor(null);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not save result', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setSavingResult(false);
     }
   };
 
@@ -203,6 +246,7 @@ export default function HomeScreen() {
             ) : (
               drills.map((drill) => {
                 const done = completedToday.has(drill.id);
+                const result = formatResult(completedToday.get(drill.id));
                 return (
                   <View key={drill.id} style={[styles.drillRow, done && styles.drillRowDone]}>
                     <Pressable
@@ -220,12 +264,30 @@ export default function HomeScreen() {
                         <ActivityIndicator color={colors.primary} />
                       ) : (
                         <Text style={done ? styles.checkDone : styles.checkPending}>
-                          {done ? '✓ Done' : 'Mark done'}
+                          {done ? `✓ Done${result ? ` · ${result}` : ''}` : 'Mark done'}
                         </Text>
                       )}
                     </Pressable>
+                    {drill.videoUrl ? (
+                      <Pressable
+                        style={styles.iconButton}
+                        onPress={() => Linking.openURL(drill.videoUrl!)}
+                        hitSlop={8}
+                      >
+                        <Text style={styles.iconButtonText}>▶️</Text>
+                      </Pressable>
+                    ) : null}
+                    {done ? (
+                      <Pressable
+                        style={styles.iconButton}
+                        onPress={() => openResultLogger(player.id, drill, completedToday.get(drill.id))}
+                        hitSlop={8}
+                      >
+                        <Text style={styles.iconButtonText}>📊</Text>
+                      </Pressable>
+                    ) : null}
                     <Pressable
-                      style={styles.calendarButton}
+                      style={styles.iconButton}
                       onPress={() => openScheduler(drill)}
                       disabled={addingToCalendarId === drill.id}
                       hitSlop={8}
@@ -233,7 +295,7 @@ export default function HomeScreen() {
                       {addingToCalendarId === drill.id ? (
                         <ActivityIndicator color={colors.primary} size="small" />
                       ) : (
-                        <Text style={styles.calendarButtonText}>📅</Text>
+                        <Text style={styles.iconButtonText}>📅</Text>
                       )}
                     </Pressable>
                   </View>
@@ -276,6 +338,61 @@ export default function HomeScreen() {
               </Pressable>
               <Pressable style={styles.smallButton} onPress={handleConfirmSchedule}>
                 <Text style={styles.smallButtonText}>Add to Calendar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={loggingResultFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLoggingResultFor(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{loggingResultFor?.drill.name}</Text>
+            <Text style={styles.modalHint}>
+              Optional — log a result if it applies (makes/attempts for
+              shooting, or just attempts for a rep count). Leave blank to
+              skip.
+            </Text>
+            <Text style={styles.modalLabel}>Makes</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              placeholder="Optional"
+              placeholderTextColor={colors.textMuted}
+              value={resultMakes}
+              onChangeText={setResultMakes}
+            />
+            <Text style={styles.modalLabel}>Attempts / Reps</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              placeholder="Optional"
+              placeholderTextColor={colors.textMuted}
+              value={resultAttempts}
+              onChangeText={setResultAttempts}
+            />
+            <View style={styles.modalButtonRow}>
+              <Pressable
+                style={[styles.smallButton, styles.smallButtonSecondary]}
+                onPress={() => setLoggingResultFor(null)}
+              >
+                <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.smallButton, savingResult && styles.buttonDisabled]}
+                onPress={handleSaveResult}
+                disabled={savingResult}
+              >
+                {savingResult ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.smallButtonText}>Save</Text>
+                )}
               </Pressable>
             </View>
           </View>
@@ -335,8 +452,8 @@ const styles = StyleSheet.create({
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   checkPending: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   checkDone: { color: colors.accentDark, fontSize: 13, fontWeight: '700' },
-  calendarButton: { paddingLeft: 8 },
-  calendarButtonText: { fontSize: 20 },
+  iconButton: { paddingLeft: 8 },
+  iconButtonText: { fontSize: 20 },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -350,7 +467,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 },
+  modalHint: { fontSize: 12, color: colors.textMuted, lineHeight: 16 },
   modalLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 8 },
+  buttonDisabled: { opacity: 0.6 },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
