@@ -7,6 +7,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -184,6 +185,17 @@ export default function MyTeamScreen() {
     }
   };
 
+  // Uses the native share sheet rather than a clipboard package — a
+  // clipboard package would be a new native module, which needs a fresh
+  // dev-client/EAS build before it works at all (same class of problem as
+  // the TestFlight/dev-client bundle-ID issue). Share is already part of
+  // React Native core, so this works with today's build, and the iOS share
+  // sheet already includes a "Copy" action plus direct-to-Messages/Mail —
+  // covers "copy it" and "send it out" in one action.
+  const handleShareInviteCode = (code: string) => {
+    Share.share({ message: `Join my DrillStreak team with invite code: ${code}` });
+  };
+
   const handleTogglePromptForResults = async (value: boolean) => {
     if (!team) return;
     setTeam({ ...team, prompt_for_results: value }); // optimistic — instant toggle feel
@@ -357,7 +369,14 @@ export default function MyTeamScreen() {
 
           <View style={styles.inviteCard}>
             <Text style={styles.inviteLabel}>Invite code · free for coaches, always</Text>
-            <Text style={styles.inviteCode}>{team.invite_code}</Text>
+            <Pressable
+              style={styles.inviteCodeRow}
+              onPress={() => handleShareInviteCode(team.invite_code)}
+              onLongPress={() => handleShareInviteCode(team.invite_code)}
+            >
+              <Text style={styles.inviteCode}>{team.invite_code}</Text>
+              <Text style={styles.inviteShareIcon}>📤</Text>
+            </Pressable>
             <Text style={styles.invitePlaceholder}>
               Share this with every player and parent on your roster — the
               more of them who join, the more accountability data you see on
@@ -559,12 +578,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   inviteLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
+  inviteCodeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inviteCode: {
     color: colors.accent,
     fontSize: 28,
     fontWeight: '700',
     letterSpacing: 2,
   },
+  inviteShareIcon: { fontSize: 20 },
   invitePlaceholder: { color: '#FFFFFF', fontSize: 12, opacity: 0.85, marginTop: 4 },
   settingRow: {
     flexDirection: 'row',

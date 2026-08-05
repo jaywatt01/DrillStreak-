@@ -466,6 +466,15 @@ grant execute on function list_my_players() to authenticated;
 -- creation) — a real bug caught the same day this shipped: setting them at
 -- creation meant any drill the challenger logged earlier that same day,
 -- before ever sending the invite, counted toward their total immediately.
+-- Second real bug, caught the same day as the first fix: starts_at/ends_at
+-- are DATE columns (day granularity), so moving them to accept-time only
+-- fixed the case where creation and acceptance fall on different days — if
+-- both happen the same day (the common case in real testing), any drill
+-- already logged earlier that same day still shared `date = starts_at`
+-- and still counted. Fixed properly with `accepted_at` (a real timestamp,
+-- not a date) as the actual counting boundary — see accept_challenge and
+-- get_player_challenges below. starts_at/ends_at stay as dates purely for
+-- the human-readable "N days left" display.
 -- ---------------------------------------------------------------------------
 create table challenges (
   id uuid primary key default gen_random_uuid(),
@@ -474,6 +483,7 @@ create table challenges (
   opponent_player_id uuid not null references players(id) on delete cascade,
   starts_at date,
   ends_at date,
+  accepted_at timestamptz,
   accepted boolean not null default false,
   created_at timestamptz not null default now(),
   check (challenger_player_id <> opponent_player_id),
@@ -483,13 +493,34 @@ create table challenges (
 alter table challenges enable row level security;
 
 -- Same shape as completions_owner_access: either side of the challenge can
--- see/update/delete it (accept = update accepted to true; decline = delete).
+-- see/update/delete it (accept = via accept_challenge below; decline = delete).
 create policy challenges_access on challenges
   for all
   using (
     is_player_owner_or_guardian(challenger_player_id, auth.uid())
     or is_player_owner_or_guardian(opponent_player_id, auth.uid())
   );
+
+-- accept_challenge: sets accepted_at server-side via now() rather than
+-- trusting a client-supplied timestamp — the client clock could be wrong
+-- or, worse, deliberately backdated to inflate a score. security invoker
+-- (default) is enough here: challenges_access RLS already lets the
+-- opponent update this row, this function just guarantees the timestamp
+-- itself is real server time.
+create or replace function accept_challenge(p_challenge_id uuid)
+returns void
+language sql
+set search_path = public
+as $$
+  update challenges
+  set accepted = true,
+      accepted_at = now(),
+      starts_at = current_date,
+      ends_at = current_date + 7
+  where id = p_challenge_id;
+$$;
+
+grant execute on function accept_challenge(uuid) to authenticated;
 
 -- get_teammates: security-definer, same reason as player_has_prompt_for_
 -- results above — players_access RLS only lets a caller see a players row
@@ -551,11 +582,15 @@ as $$
   select
     c.id, c.team_id,
     c.challenger_player_id, cp.display_name,
+    -- created_at (a real timestamp), not date (day granularity) — the
+    -- earlier fix used date >= starts_at, which still counted same-day
+    -- completions logged before the actual accept moment. accepted_at is
+    -- set server-side by accept_challenge, so this is trustworthy.
     (select count(*) from completions comp where comp.player_id = c.challenger_player_id
-       and comp.date >= c.starts_at and comp.date <= least(c.ends_at, current_date)),
+       and comp.created_at >= c.accepted_at and comp.date <= least(c.ends_at, current_date)),
     c.opponent_player_id, op.display_name,
     (select count(*) from completions comp where comp.player_id = c.opponent_player_id
-       and comp.date >= c.starts_at and comp.date <= least(c.ends_at, current_date)),
+       and comp.created_at >= c.accepted_at and comp.date <= least(c.ends_at, current_date)),
     c.starts_at, c.ends_at, c.accepted, c.created_at
   from challenges c
   join players cp on cp.id = c.challenger_player_id
@@ -839,3 +874,76 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- alter table challenges alter column starts_at drop default;
 -- alter table challenges alter column ends_at drop not null;
 -- update challenges set accepted = false, starts_at = null, ends_at = null;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-05, third batch):
+-- second real bug in the same feature, caught on the very next test after
+-- the last fix. starts_at/ends_at are DATE columns (day granularity), so
+-- the last fix only solved the case where creation and acceptance land on
+-- different days — same-day (the common real case) still let a drill
+-- logged before the accept count, since it shared the same calendar date
+-- as starts_at. Fixed with accepted_at, a real timestamp set server-side
+-- by a new accept_challenge() function (not client-supplied — a client
+-- clock could be wrong or backdated). Run against the live project after
+-- the second challenges migration. No data loss: resets the one existing
+-- test challenge back to pending again, same as the last migration did.
+-- ---------------------------------------------------------------------------
+-- alter table challenges add column accepted_at timestamptz;
+--
+-- create or replace function accept_challenge(p_challenge_id uuid)
+-- returns void
+-- language sql
+-- set search_path = public
+-- as $$
+--   update challenges
+--   set accepted = true,
+--       accepted_at = now(),
+--       starts_at = current_date,
+--       ends_at = current_date + 7
+--   where id = p_challenge_id;
+-- $$;
+--
+-- grant execute on function accept_challenge(uuid) to authenticated;
+--
+-- create or replace function get_player_challenges(p_player_id uuid)
+-- returns table(
+--   id uuid,
+--   team_id uuid,
+--   challenger_player_id uuid,
+--   challenger_name text,
+--   challenger_completions bigint,
+--   opponent_player_id uuid,
+--   opponent_name text,
+--   opponent_completions bigint,
+--   starts_at date,
+--   ends_at date,
+--   accepted boolean,
+--   created_at timestamptz
+-- )
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     c.id, c.team_id,
+--     c.challenger_player_id, cp.display_name,
+--     (select count(*) from completions comp where comp.player_id = c.challenger_player_id
+--        and comp.created_at >= c.accepted_at and comp.date <= least(c.ends_at, current_date)),
+--     c.opponent_player_id, op.display_name,
+--     (select count(*) from completions comp where comp.player_id = c.opponent_player_id
+--        and comp.created_at >= c.accepted_at and comp.date <= least(c.ends_at, current_date)),
+--     c.starts_at, c.ends_at, c.accepted, c.created_at
+--   from challenges c
+--   join players cp on cp.id = c.challenger_player_id
+--   join players op on op.id = c.opponent_player_id
+--   where (c.challenger_player_id = p_player_id or c.opponent_player_id = p_player_id)
+--     and is_player_owner_or_guardian(p_player_id, auth.uid())
+--   order by c.created_at desc;
+-- $$;
+--
+-- revoke all on function get_player_challenges(uuid) from public;
+-- revoke all on function get_player_challenges(uuid) from anon;
+-- grant execute on function get_player_challenges(uuid) to authenticated;
+--
+-- update challenges set accepted = false, accepted_at = null, starts_at = null, ends_at = null;
