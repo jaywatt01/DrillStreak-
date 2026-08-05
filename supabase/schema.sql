@@ -449,6 +449,123 @@ $$;
 grant execute on function list_my_players() to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- challenges: mutual/opt-in head-to-head between two teammates (Apple Watch
+-- Activity-style), added 2026-08-05 per DRILLSTREAK.md's Future Feature
+-- Idea #1 and the growth-strategy application ranking it as the one real
+-- acquisition-driving (not just engagement) feature. Scoped to teammates on
+-- the same roster, not open cross-team/stranger challenges — matches the
+-- actual validated signal (teammates comparing streaks) and avoids the
+-- bigger stranger-visibility design problem a friend-code system would
+-- open up. Metric is total drill completions logged during the window —
+-- reuses the existing completions table, no new column needed there.
+-- `accepted` false = pending invite; true = active/ongoing. "Declined" is
+-- a delete, not a third status; "completed" is derived at read time
+-- (ends_at in the past), never written — same compute-don't-store pattern
+-- already used for streaks and video rotation elsewhere in this schema.
+-- ---------------------------------------------------------------------------
+create table challenges (
+  id uuid primary key default gen_random_uuid(),
+  team_id uuid not null references teams(id) on delete cascade,
+  challenger_player_id uuid not null references players(id) on delete cascade,
+  opponent_player_id uuid not null references players(id) on delete cascade,
+  starts_at date not null default current_date,
+  ends_at date not null,
+  accepted boolean not null default false,
+  created_at timestamptz not null default now(),
+  check (challenger_player_id <> opponent_player_id),
+  check (ends_at > starts_at)
+);
+
+alter table challenges enable row level security;
+
+-- Same shape as completions_owner_access: either side of the challenge can
+-- see/update/delete it (accept = update accepted to true; decline = delete).
+create policy challenges_access on challenges
+  for all
+  using (
+    is_player_owner_or_guardian(challenger_player_id, auth.uid())
+    or is_player_owner_or_guardian(opponent_player_id, auth.uid())
+  );
+
+-- get_teammates: security-definer, same reason as player_has_prompt_for_
+-- results above — players_access RLS only lets a caller see a players row
+-- they own/guard or coach, so a player could never list *other* players on
+-- their own team to pick a challenge opponent from. Bypasses that
+-- restriction for just id+display_name, re-verifying the caller actually
+-- owns/guards p_player_id first.
+create or replace function get_teammates(p_player_id uuid)
+returns table(id uuid, display_name text, team_id uuid)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  -- distinct on (p.id) so a pair sharing more than one team still returns
+  -- one row per teammate, not one per shared team; team_id picked
+  -- deterministically (lowest uuid) since which shared roster gets
+  -- recorded on the resulting challenge doesn't matter functionally.
+  select distinct on (p.id) p.id, p.display_name, tm_other.team_id
+  from players p
+  join team_memberships tm_other on tm_other.player_id = p.id
+  join team_memberships tm_self on tm_self.team_id = tm_other.team_id
+  where tm_self.player_id = p_player_id
+    and p.id <> p_player_id
+    and is_player_owner_or_guardian(p_player_id, auth.uid())
+  order by p.id, tm_other.team_id;
+$$;
+
+revoke all on function get_teammates(uuid) from public;
+revoke all on function get_teammates(uuid) from anon;
+grant execute on function get_teammates(uuid) to authenticated;
+
+-- get_player_challenges: security-definer for the same reason as
+-- get_teammates — rendering a challenge needs the OTHER player's display
+-- name and completion count, both blocked by players_access/completions
+-- RLS for anyone but that player's own owner/guardian. Returns only
+-- aggregated counts for the opponent side (never raw completion rows), and
+-- re-verifies the caller owns/guards p_player_id before returning anything.
+create or replace function get_player_challenges(p_player_id uuid)
+returns table(
+  id uuid,
+  team_id uuid,
+  challenger_player_id uuid,
+  challenger_name text,
+  challenger_completions bigint,
+  opponent_player_id uuid,
+  opponent_name text,
+  opponent_completions bigint,
+  starts_at date,
+  ends_at date,
+  accepted boolean,
+  created_at timestamptz
+)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    c.id, c.team_id,
+    c.challenger_player_id, cp.display_name,
+    (select count(*) from completions comp where comp.player_id = c.challenger_player_id
+       and comp.date >= c.starts_at and comp.date <= least(c.ends_at, current_date)),
+    c.opponent_player_id, op.display_name,
+    (select count(*) from completions comp where comp.player_id = c.opponent_player_id
+       and comp.date >= c.starts_at and comp.date <= least(c.ends_at, current_date)),
+    c.starts_at, c.ends_at, c.accepted, c.created_at
+  from challenges c
+  join players cp on cp.id = c.challenger_player_id
+  join players op on op.id = c.opponent_player_id
+  where (c.challenger_player_id = p_player_id or c.opponent_player_id = p_player_id)
+    and is_player_owner_or_guardian(p_player_id, auth.uid())
+  order by c.created_at desc;
+$$;
+
+revoke all on function get_player_challenges(uuid) from public;
+revoke all on function get_player_challenges(uuid) from anon;
+grant execute on function get_player_challenges(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Seed: default drill library (10 drills, 3 categories)
 -- estimated_minutes is only backfilled for the 4 drills that already state
 -- a time in their name — the other 6 are rep-based with no stated time, so
@@ -613,3 +730,93 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function player_has_prompt_for_results(uuid) from public;
 -- revoke all on function player_has_prompt_for_results(uuid) from anon;
 -- grant execute on function player_has_prompt_for_results(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-05): the "challenge
+-- a friend" feature — Future Feature Idea #1, moved up per the growth-
+-- strategy application (see DRILLSTREAK.md, "Growth/strategy framework
+-- application"). Run against the live project.
+-- ---------------------------------------------------------------------------
+-- create table challenges (
+--   id uuid primary key default gen_random_uuid(),
+--   team_id uuid not null references teams(id) on delete cascade,
+--   challenger_player_id uuid not null references players(id) on delete cascade,
+--   opponent_player_id uuid not null references players(id) on delete cascade,
+--   starts_at date not null default current_date,
+--   ends_at date not null,
+--   accepted boolean not null default false,
+--   created_at timestamptz not null default now(),
+--   check (challenger_player_id <> opponent_player_id),
+--   check (ends_at > starts_at)
+-- );
+--
+-- alter table challenges enable row level security;
+--
+-- create policy challenges_access on challenges
+--   for all
+--   using (
+--     is_player_owner_or_guardian(challenger_player_id, auth.uid())
+--     or is_player_owner_or_guardian(opponent_player_id, auth.uid())
+--   );
+--
+-- create or replace function get_teammates(p_player_id uuid)
+-- returns table(id uuid, display_name text, team_id uuid)
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select distinct on (p.id) p.id, p.display_name, tm_other.team_id
+--   from players p
+--   join team_memberships tm_other on tm_other.player_id = p.id
+--   join team_memberships tm_self on tm_self.team_id = tm_other.team_id
+--   where tm_self.player_id = p_player_id
+--     and p.id <> p_player_id
+--     and is_player_owner_or_guardian(p_player_id, auth.uid())
+--   order by p.id, tm_other.team_id;
+-- $$;
+--
+-- revoke all on function get_teammates(uuid) from public;
+-- revoke all on function get_teammates(uuid) from anon;
+-- grant execute on function get_teammates(uuid) to authenticated;
+--
+-- create or replace function get_player_challenges(p_player_id uuid)
+-- returns table(
+--   id uuid,
+--   team_id uuid,
+--   challenger_player_id uuid,
+--   challenger_name text,
+--   challenger_completions bigint,
+--   opponent_player_id uuid,
+--   opponent_name text,
+--   opponent_completions bigint,
+--   starts_at date,
+--   ends_at date,
+--   accepted boolean,
+--   created_at timestamptz
+-- )
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     c.id, c.team_id,
+--     c.challenger_player_id, cp.display_name,
+--     (select count(*) from completions comp where comp.player_id = c.challenger_player_id
+--        and comp.date >= c.starts_at and comp.date <= least(c.ends_at, current_date)),
+--     c.opponent_player_id, op.display_name,
+--     (select count(*) from completions comp where comp.player_id = c.opponent_player_id
+--        and comp.date >= c.starts_at and comp.date <= least(c.ends_at, current_date)),
+--     c.starts_at, c.ends_at, c.accepted, c.created_at
+--   from challenges c
+--   join players cp on cp.id = c.challenger_player_id
+--   join players op on op.id = c.opponent_player_id
+--   where (c.challenger_player_id = p_player_id or c.opponent_player_id = p_player_id)
+--     and is_player_owner_or_guardian(p_player_id, auth.uid())
+--   order by c.created_at desc;
+-- $$;
+--
+-- revoke all on function get_player_challenges(uuid) from public;
+-- revoke all on function get_player_challenges(uuid) from anon;
+-- grant execute on function get_player_challenges(uuid) to authenticated;

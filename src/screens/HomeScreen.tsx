@@ -31,6 +31,15 @@ import {
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
 import { getPromptForResultsForPlayer } from '../lib/team';
+import {
+  acceptChallenge,
+  Challenge,
+  createChallenge,
+  declineChallenge,
+  getChallengesForPlayer,
+  getTeammates,
+  Teammate,
+} from '../lib/challenges';
 
 type PlayerCardData = {
   player: Player;
@@ -39,7 +48,12 @@ type PlayerCardData = {
   streak: number;
   completedToday: Map<string, DrillResult>;
   promptForResults: boolean;
+  challenges: Challenge[];
 };
+
+function daysLeft(endsAt: string): number {
+  return Math.max(0, Math.ceil((new Date(endsAt).getTime() - new Date().getTime()) / 86400000));
+}
 
 // "8/10" if both are set, "8 reps" if just a rep count was logged, null
 // if no result was logged for this completion at all.
@@ -76,6 +90,11 @@ export default function HomeScreen() {
   const [resultMakes, setResultMakes] = useState('');
   const [resultAttempts, setResultAttempts] = useState('');
   const [savingResult, setSavingResult] = useState(false);
+  const [challengingFor, setChallengingFor] = useState<string | null>(null);
+  const [teammates, setTeammates] = useState<Teammate[]>([]);
+  const [loadingTeammates, setLoadingTeammates] = useState(false);
+  const [creatingChallengeId, setCreatingChallengeId] = useState<string | null>(null);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -83,11 +102,12 @@ export default function HomeScreen() {
       const players = await listMyPlayers();
       const cardData = await Promise.all(
         players.map(async (player) => {
-          const [{ drills, source }, dates, completedToday, promptForResults] = await Promise.all([
+          const [{ drills, source }, dates, completedToday, promptForResults, challenges] = await Promise.all([
             getWeeklyDrills(player.id),
             getCompletionDates(player.id),
             getTodayCompletions(player.id),
             getPromptForResultsForPlayer(player.id),
+            getChallengesForPlayer(player.id),
           ]);
           return {
             player,
@@ -96,6 +116,7 @@ export default function HomeScreen() {
             streak: calculateStreak(dates),
             completedToday,
             promptForResults,
+            challenges,
           };
         })
       );
@@ -160,6 +181,57 @@ export default function HomeScreen() {
       Alert.alert('Could not save result', e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
       setSavingResult(false);
+    }
+  };
+
+  const openChallengePicker = async (playerId: string) => {
+    setChallengingFor(playerId);
+    setLoadingTeammates(true);
+    try {
+      setTeammates(await getTeammates(playerId));
+    } catch (e) {
+      Alert.alert('Could not load teammates', e instanceof Error ? e.message : 'Something went wrong.');
+      setChallengingFor(null);
+    } finally {
+      setLoadingTeammates(false);
+    }
+  };
+
+  const handleCreateChallenge = async (teammate: Teammate) => {
+    if (!challengingFor) return;
+    setCreatingChallengeId(teammate.id);
+    try {
+      await createChallenge(teammate.team_id, challengingFor, teammate.id);
+      setChallengingFor(null);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not send challenge', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setCreatingChallengeId(null);
+    }
+  };
+
+  const handleAcceptChallenge = async (challengeId: string) => {
+    setRespondingId(challengeId);
+    try {
+      await acceptChallenge(challengeId);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not accept challenge', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  const handleDeclineChallenge = async (challengeId: string) => {
+    setRespondingId(challengeId);
+    try {
+      await declineChallenge(challengeId);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not remove challenge', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setRespondingId(null);
     }
   };
 
@@ -236,7 +308,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       ) : (
-        cards.map(({ player, drills, source, streak, completedToday, promptForResults }) => (
+        cards.map(({ player, drills, source, streak, completedToday, promptForResults, challenges }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
 
@@ -245,6 +317,80 @@ export default function HomeScreen() {
               <Text style={styles.streakValue}>
                 {streak} {streak === 1 ? 'day' : 'days'}
               </Text>
+            </View>
+
+            <View style={styles.challengesSection}>
+              <Text style={styles.sectionTitle}>Challenges</Text>
+              {challenges.map((c) => {
+                const isChallenger = c.challengerPlayerId === player.id;
+                const opponentName = isChallenger ? c.opponentName : c.challengerName;
+                const myCount = isChallenger ? c.challengerCompletions : c.opponentCompletions;
+                const theirCount = isChallenger ? c.opponentCompletions : c.challengerCompletions;
+                const ended = daysLeft(c.endsAt) === 0;
+                const responding = respondingId === c.id;
+
+                if (!c.accepted && !isChallenger) {
+                  // Received, not yet responded to.
+                  return (
+                    <View key={c.id} style={styles.challengeRow}>
+                      <Text style={styles.challengeText}>{c.challengerName} challenged you!</Text>
+                      <View style={styles.modalButtonRow}>
+                        <Pressable
+                          style={[styles.smallButton, styles.smallButtonSecondary]}
+                          onPress={() => handleDeclineChallenge(c.id)}
+                          disabled={responding}
+                        >
+                          <Text style={styles.smallButtonSecondaryText}>Decline</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => handleAcceptChallenge(c.id)}
+                          disabled={responding}
+                        >
+                          {responding ? (
+                            <ActivityIndicator color="#FFFFFF" size="small" />
+                          ) : (
+                            <Text style={styles.smallButtonText}>Accept</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                }
+
+                if (!c.accepted && isChallenger) {
+                  // Sent, waiting on the other player.
+                  return (
+                    <View key={c.id} style={styles.challengeRow}>
+                      <Text style={styles.challengeText}>Waiting for {opponentName} to accept…</Text>
+                      <Pressable onPress={() => handleDeclineChallenge(c.id)} disabled={responding} hitSlop={8}>
+                        <Text style={styles.challengeCancel}>{responding ? '…' : 'Cancel'}</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+
+                // Accepted — active or ended.
+                return (
+                  <View key={c.id} style={styles.challengeRow}>
+                    <Text style={styles.challengeText}>
+                      vs {opponentName}: You {myCount} · {opponentName} {theirCount}
+                    </Text>
+                    <Text style={styles.challengeSubtext}>
+                      {ended
+                        ? myCount === theirCount
+                          ? 'Tied'
+                          : myCount > theirCount
+                          ? 'You won! 🏆'
+                          : `${opponentName} won`
+                        : `${daysLeft(c.endsAt)} ${daysLeft(c.endsAt) === 1 ? 'day' : 'days'} left`}
+                    </Text>
+                  </View>
+                );
+              })}
+              <Pressable style={styles.challengeButton} onPress={() => openChallengePicker(player.id)}>
+                <Text style={styles.challengeButtonText}>+ Challenge a teammate</Text>
+              </Pressable>
             </View>
 
             <Text style={styles.sectionTitle}>
@@ -408,6 +554,51 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={challengingFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChallengingFor(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Challenge a teammate</Text>
+            <Text style={styles.modalHint}>
+              A 7-day head-to-head on total drills completed. They'll need to accept before it starts.
+            </Text>
+            {loadingTeammates ? (
+              <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} />
+            ) : teammates.length === 0 ? (
+              <Text style={styles.placeholder}>
+                No teammates found yet — join a team to challenge someone.
+              </Text>
+            ) : (
+              teammates.map((t) => (
+                <Pressable
+                  key={t.id}
+                  style={styles.teammateRow}
+                  onPress={() => handleCreateChallenge(t)}
+                  disabled={creatingChallengeId != null}
+                >
+                  <Text style={styles.teammateName}>{t.display_name}</Text>
+                  {creatingChallengeId === t.id ? (
+                    <ActivityIndicator color={colors.primary} size="small" />
+                  ) : (
+                    <Text style={styles.checkPending}>Challenge</Text>
+                  )}
+                </Pressable>
+              ))
+            )}
+            <Pressable
+              style={[styles.smallButton, styles.smallButtonSecondary, { marginTop: 12 }]}
+              onPress={() => setChallengingFor(null)}
+            >
+              <Text style={styles.smallButtonSecondaryText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -464,6 +655,40 @@ const styles = StyleSheet.create({
   checkDone: { color: colors.successDark, fontSize: 13, fontWeight: '700' },
   iconButton: { paddingLeft: 8 },
   iconButtonText: { fontSize: 20 },
+  challengesSection: { gap: 8 },
+  challengeRow: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  challengeText: { fontSize: 14, fontWeight: '600', color: colors.text, flexShrink: 1 },
+  challengeSubtext: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
+  challengeCancel: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
+  challengeButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  challengeButtonText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
+  teammateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  teammateName: { fontSize: 15, fontWeight: '600', color: colors.text },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
