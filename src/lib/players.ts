@@ -356,3 +356,16 @@ export async function logDrillResult(
     .eq('date', todayDateString());
   if (error) throw error;
 }
+
+// Undoes a mistaken "mark done" tap — deletes today's completion entirely
+// (including any logged makes/attempts), not just resetting a flag, so the
+// drill goes back to a real not-done state and can be marked done again.
+export async function deleteCompletion(playerId: string, drillId: string): Promise<void> {
+  const { error } = await supabase
+    .from('completions')
+    .delete()
+    .eq('player_id', playerId)
+    .eq('drill_id', drillId)
+    .eq('date', todayDateString());
+  if (error) throw error;
+}

@@ -19,6 +19,7 @@ import { colors } from '../theme/colors';
 import {
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
+  deleteCompletion,
   DrillResult,
   getCompletionDates,
   getTodayCompletions,
@@ -51,7 +52,10 @@ type PlayerCardData = {
   challenges: Challenge[];
 };
 
-function daysLeft(endsAt: string): number {
+// Only meaningful once a challenge is accepted (endsAt set) — pending
+// challenges never call this.
+function daysLeft(endsAt: string | null): number {
+  if (!endsAt) return 0;
   return Math.max(0, Math.ceil((new Date(endsAt).getTime() - new Date().getTime()) / 86400000));
 }
 
@@ -157,6 +161,34 @@ export default function HomeScreen() {
     }
   };
 
+  // Undo for an accidental "mark done" tap. Confirmed first since this is a
+  // real delete — any logged makes/attempts for today go with it, and the
+  // drill goes back to not-done (can be marked done again after).
+  const handleUnmarkComplete = (playerId: string, drill: WeeklyDrill) => {
+    Alert.alert(
+      'Remove this completion?',
+      `"${drill.name}" will go back to not done today. Any makes/attempts you logged for it will be lost.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setMarkingId(drill.id);
+            try {
+              await deleteCompletion(playerId, drill.id);
+              await load();
+            } catch (e) {
+              Alert.alert('Could not remove', e instanceof Error ? e.message : 'Something went wrong.');
+            } finally {
+              setMarkingId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const openResultLogger = (playerId: string, drill: WeeklyDrill, existing: DrillResult | undefined) => {
     setResultMakes(existing?.makes != null ? String(existing.makes) : '');
     setResultAttempts(existing?.attempts != null ? String(existing.attempts) : '');
@@ -233,6 +265,21 @@ export default function HomeScreen() {
     } finally {
       setRespondingId(null);
     }
+  };
+
+  // Quitting an active challenge is confirmed (unlike declining/canceling a
+  // still-pending one) — it ends something the other player is actively
+  // in, without asking them. Doesn't touch either player's drill history,
+  // only the challenge record itself.
+  const handleQuitChallenge = (challengeId: string, opponentName: string) => {
+    Alert.alert(
+      'Quit this challenge?',
+      `This ends the challenge with ${opponentName} for both of you. Your drill history isn't affected.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Quit', style: 'destructive', onPress: () => handleDeclineChallenge(challengeId) },
+      ]
+    );
   };
 
   const openScheduler = (drill: WeeklyDrill) => {
@@ -373,18 +420,27 @@ export default function HomeScreen() {
                 // Accepted — active or ended.
                 return (
                   <View key={c.id} style={styles.challengeRow}>
-                    <Text style={styles.challengeText}>
-                      vs {opponentName}: You {myCount} · {opponentName} {theirCount}
-                    </Text>
-                    <Text style={styles.challengeSubtext}>
-                      {ended
-                        ? myCount === theirCount
-                          ? 'Tied'
-                          : myCount > theirCount
-                          ? 'You won! 🏆'
-                          : `${opponentName} won`
-                        : `${daysLeft(c.endsAt)} ${daysLeft(c.endsAt) === 1 ? 'day' : 'days'} left`}
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.challengeText}>
+                        vs {opponentName}: You {myCount} · {opponentName} {theirCount}
+                      </Text>
+                      <Text style={styles.challengeSubtext}>
+                        {ended
+                          ? myCount === theirCount
+                            ? 'Tied'
+                            : myCount > theirCount
+                            ? 'You won! 🏆'
+                            : `${opponentName} won`
+                          : `${daysLeft(c.endsAt)} ${daysLeft(c.endsAt) === 1 ? 'day' : 'days'} left`}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => (ended ? handleDeclineChallenge(c.id) : handleQuitChallenge(c.id, opponentName))}
+                      disabled={responding}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.challengeCancel}>{responding ? '…' : ended ? 'Remove' : 'Quit'}</Text>
+                    </Pressable>
                   </View>
                 );
               })}
@@ -440,6 +496,16 @@ export default function HomeScreen() {
                         hitSlop={8}
                       >
                         <Text style={styles.iconButtonText}>📊</Text>
+                      </Pressable>
+                    ) : null}
+                    {done ? (
+                      <Pressable
+                        style={styles.iconButton}
+                        onPress={() => handleUnmarkComplete(player.id, drill)}
+                        disabled={markingId === drill.id}
+                        hitSlop={8}
+                      >
+                        <Text style={styles.iconButtonText}>↩️</Text>
                       </Pressable>
                     ) : null}
                     <Pressable
