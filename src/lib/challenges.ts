@@ -22,8 +22,6 @@ export type Challenge = {
   accepted: boolean;
 };
 
-const CHALLENGE_LENGTH_DAYS = 7;
-
 function mapChallengeRow(row: any): Challenge {
   return {
     id: row.id,
@@ -79,19 +77,15 @@ export async function createChallenge(
 }
 
 // This is where the 7-day window actually starts — both players begin at
-// 0, counting only completions logged from today onward.
+// 0, counting only completions logged from this moment onward. Goes
+// through the accept_challenge RPC rather than a client-side update so the
+// start timestamp is set by the server's own clock (now()), not a
+// client-supplied one — a client timestamp could be wrong, or backdated to
+// inflate a score. This also closes the same-day bug the first fix missed:
+// the RPC sets accepted_at (a real timestamp), and get_player_challenges
+// counts from that moment, not from the day as a whole.
 export async function acceptChallenge(challengeId: string): Promise<void> {
-  const startsAt = new Date();
-  const endsAt = new Date(startsAt);
-  endsAt.setDate(endsAt.getDate() + CHALLENGE_LENGTH_DAYS);
-  const { error } = await supabase
-    .from('challenges')
-    .update({
-      accepted: true,
-      starts_at: startsAt.toISOString().slice(0, 10),
-      ends_at: endsAt.toISOString().slice(0, 10),
-    })
-    .eq('id', challengeId);
+  const { error } = await supabase.rpc('accept_challenge', { p_challenge_id: challengeId });
   if (error) throw error;
 }
 
