@@ -446,8 +446,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   drillRowDone: {
-    borderColor: colors.accent,
-    backgroundColor: '#FFF8EA',
+    borderColor: colors.success,
+    backgroundColor: '#EAF7EE',
   },
   drillRowMain: {
     flex: 1,
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
   drillName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   checkPending: { color: colors.primary, fontSize: 13, fontWeight: '600' },
-  checkDone: { color: colors.accentDark, fontSize: 13, fontWeight: '700' },
+  checkDone: { color: colors.successDark, fontSize: 13, fontWeight: '700' },
   iconButton: { paddingLeft: 8 },
   iconButtonText: { fontSize: 20 },
   modalOverlay: {
