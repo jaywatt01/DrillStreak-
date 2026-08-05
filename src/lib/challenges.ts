@@ -15,8 +15,10 @@ export type Challenge = {
   opponentPlayerId: string;
   opponentName: string;
   opponentCompletions: number;
-  startsAt: string;
-  endsAt: string;
+  // Null until accepted — the race hasn't actually started yet, so there's
+  // no window to compute a score or days-left against.
+  startsAt: string | null;
+  endsAt: string | null;
   accepted: boolean;
 };
 
@@ -58,31 +60,45 @@ export async function getChallengesForPlayer(playerId: string): Promise<Challeng
   return (data ?? []).map(mapChallengeRow);
 }
 
+// Deliberately does NOT set starts_at/ends_at — the race doesn't begin
+// until the opponent actually accepts (see acceptChallenge below). Setting
+// the window at creation time was a real bug: any drills the challenger
+// already logged today, before sending the invite, counted toward their
+// total the instant the challenge existed.
 export async function createChallenge(
   teamId: string,
   challengerPlayerId: string,
   opponentPlayerId: string
 ): Promise<void> {
-  const startsAt = new Date();
-  const endsAt = new Date(startsAt);
-  endsAt.setDate(endsAt.getDate() + CHALLENGE_LENGTH_DAYS);
   const { error } = await supabase.from('challenges').insert({
     team_id: teamId,
     challenger_player_id: challengerPlayerId,
     opponent_player_id: opponentPlayerId,
-    starts_at: startsAt.toISOString().slice(0, 10),
-    ends_at: endsAt.toISOString().slice(0, 10),
   });
   if (error) throw error;
 }
 
+// This is where the 7-day window actually starts — both players begin at
+// 0, counting only completions logged from today onward.
 export async function acceptChallenge(challengeId: string): Promise<void> {
-  const { error } = await supabase.from('challenges').update({ accepted: true }).eq('id', challengeId);
+  const startsAt = new Date();
+  const endsAt = new Date(startsAt);
+  endsAt.setDate(endsAt.getDate() + CHALLENGE_LENGTH_DAYS);
+  const { error } = await supabase
+    .from('challenges')
+    .update({
+      accepted: true,
+      starts_at: startsAt.toISOString().slice(0, 10),
+      ends_at: endsAt.toISOString().slice(0, 10),
+    })
+    .eq('id', challengeId);
   if (error) throw error;
 }
 
-// Also used to cancel a still-pending challenge you sent yourself — same
-// action (delete the row) either way.
+// Same delete action covers three UI cases: declining a received invite,
+// canceling one you sent, and quitting an already-active challenge early.
+// Never touches completions — the underlying drill history for both
+// players is completely unaffected either way.
 export async function declineChallenge(challengeId: string): Promise<void> {
   const { error } = await supabase.from('challenges').delete().eq('id', challengeId);
   if (error) throw error;

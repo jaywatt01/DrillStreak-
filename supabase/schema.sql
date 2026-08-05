@@ -462,14 +462,18 @@ grant execute on function list_my_players() to authenticated;
 -- a delete, not a third status; "completed" is derived at read time
 -- (ends_at in the past), never written — same compute-don't-store pattern
 -- already used for streaks and video rotation elsewhere in this schema.
+-- starts_at/ends_at are null until accepted (set at accept time, not
+-- creation) — a real bug caught the same day this shipped: setting them at
+-- creation meant any drill the challenger logged earlier that same day,
+-- before ever sending the invite, counted toward their total immediately.
 -- ---------------------------------------------------------------------------
 create table challenges (
   id uuid primary key default gen_random_uuid(),
   team_id uuid not null references teams(id) on delete cascade,
   challenger_player_id uuid not null references players(id) on delete cascade,
   opponent_player_id uuid not null references players(id) on delete cascade,
-  starts_at date not null default current_date,
-  ends_at date not null,
+  starts_at date,
+  ends_at date,
   accepted boolean not null default false,
   created_at timestamptz not null default now(),
   check (challenger_player_id <> opponent_player_id),
@@ -820,3 +824,18 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function get_player_challenges(uuid) from public;
 -- revoke all on function get_player_challenges(uuid) from anon;
 -- grant execute on function get_player_challenges(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-05, second batch):
+-- real bug fix, same day as the challenges table above. starts_at/ends_at
+-- were being set at challenge CREATION, so any drills the challenger had
+-- already logged that same day counted toward their total the instant the
+-- challenge existed — caught by Jay on the very first real test. Run
+-- against the live project after the first challenges migration.
+-- No data loss: the one existing test challenge just goes back to
+-- pending-with-no-window until re-accepted, same as any new challenge.
+-- ---------------------------------------------------------------------------
+-- alter table challenges alter column starts_at drop not null;
+-- alter table challenges alter column starts_at drop default;
+-- alter table challenges alter column ends_at drop not null;
+-- update challenges set accepted = false, starts_at = null, ends_at = null;
