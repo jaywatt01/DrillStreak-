@@ -2,7 +2,7 @@
 
 # DrillStreak — Video/Photo Release (Adult, 18+)
 
-I, the undersigned, being 18 years of age or older, voluntarily agree to be recorded (video and/or photo) by **[DrillStreak, LLC — update once formed / Jay Watt in the interim]** ("DrillStreak") performing basketball training drills.
+I, the undersigned, being 18 years of age or older, voluntarily agree to be recorded (video and/or photo) by **DrillStreak, LLC** ("DrillStreak") performing basketball training drills.
 
 **What I'm agreeing to:**
 
