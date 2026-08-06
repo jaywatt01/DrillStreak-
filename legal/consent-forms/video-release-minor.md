@@ -2,7 +2,7 @@
 
 # DrillStreak — Video/Photo Release (Parent/Guardian Consent for a Minor)
 
-I am the parent or legal guardian of the minor named below, and I voluntarily consent to my child being recorded (video and/or photo) by **[DrillStreak, LLC — update once formed / Jay Watt in the interim]** ("DrillStreak") performing basketball training drills.
+I am the parent or legal guardian of the minor named below, and I voluntarily consent to my child being recorded (video and/or photo) by **DrillStreak, LLC** ("DrillStreak") performing basketball training drills.
 
 **What I'm agreeing to, on my child's behalf:**
 
