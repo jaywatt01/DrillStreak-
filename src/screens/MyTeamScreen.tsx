@@ -23,6 +23,7 @@ import {
   createTeam,
   deleteTeam,
   getAvailableDrills,
+  getMyNoteForPlayer,
   getMyTeam,
   getRoster,
   getRosterCompletionsThisWeek,
@@ -31,6 +32,7 @@ import {
   renameTeam,
   RosterCompletion,
   RosterPlayer,
+  saveMyNoteForPlayer,
   setPromptForResults,
   Team,
   unassignDrill,
@@ -81,6 +83,10 @@ export default function MyTeamScreen() {
   const [pickerTime, setPickerTime] = useState(new Date());
   const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const [notePlayer, setNotePlayer] = useState<RosterPlayer | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const [loadingNote, setLoadingNote] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -204,6 +210,33 @@ export default function MyTeamScreen() {
     } catch (e) {
       setTeam({ ...team, prompt_for_results: !value }); // revert on failure
       setError(e instanceof Error ? e.message : 'Failed to update setting.');
+    }
+  };
+
+  const openNoteEditor = async (player: RosterPlayer) => {
+    setNotePlayer(player);
+    setNoteText('');
+    setLoadingNote(true);
+    try {
+      setNoteText(await getMyNoteForPlayer(player.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load note.');
+    } finally {
+      setLoadingNote(false);
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!notePlayer) return;
+    setSavingNote(true);
+    setError(null);
+    try {
+      await saveMyNoteForPlayer(notePlayer.id, noteText);
+      setNotePlayer(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save note.');
+    } finally {
+      setSavingNote(false);
     }
   };
 
@@ -407,14 +440,19 @@ export default function MyTeamScreen() {
             </Text>
           ) : (
             <>
-              <Text style={styles.placeholder}>Long-press a player to remove them from the roster.</Text>
+              <Text style={styles.placeholder}>
+                Tap a player to add or edit your note about them. Long-press to remove them
+                from the roster.
+              </Text>
               {roster.map((p) => (
                 <Pressable
                   key={p.id}
                   style={styles.rosterRow}
+                  onPress={() => openNoteEditor(p)}
                   onLongPress={() => handleLongPressRosterPlayer(p)}
                 >
                   <Text style={styles.rosterName}>{p.display_name}</Text>
+                  <Text style={styles.noteLink}>Note</Text>
                 </Pressable>
               ))}
             </>
@@ -531,6 +569,55 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={notePlayer != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNotePlayer(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{notePlayer?.display_name}'s note</Text>
+            <Text style={styles.placeholder}>
+              Visible to {notePlayer?.display_name} and their parent/guardian in Progress — not
+              paywalled, and not visible to any other coach.
+            </Text>
+            {loadingNote ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <TextInput
+                style={[styles.input, styles.noteInput]}
+                value={noteText}
+                onChangeText={setNoteText}
+                placeholder="e.g. Consistent with extra reps, great teammate, ready for varsity minutes."
+                placeholderTextColor={colors.textMuted}
+                multiline
+                numberOfLines={4}
+              />
+            )}
+            <View style={styles.editButtonRow}>
+              <Pressable
+                style={[styles.smallButton, styles.smallButtonSecondary]}
+                onPress={() => setNotePlayer(null)}
+              >
+                <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.smallButton, (loadingNote || savingNote) && styles.buttonDisabled]}
+                onPress={handleSaveNote}
+                disabled={loadingNote || savingNote}
+              >
+                {savingNote ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.smallButtonText}>Save</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -612,6 +699,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.surface,
   },
+  noteInput: { minHeight: 100, textAlignVertical: 'top' },
   button: {
     backgroundColor: colors.primary,
     borderRadius: 10,
@@ -621,6 +709,9 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   rosterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
@@ -629,6 +720,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   rosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  noteLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   drillRow: {
     borderWidth: 1,
     borderColor: colors.border,

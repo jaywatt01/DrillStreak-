@@ -3,20 +3,32 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
+import StreakCalendar from '../components/StreakCalendar';
 import {
   calculateStreak,
   CompletionHistoryEntry,
   getCompletionHistory,
+  getPlayerNotes,
   listMyPlayers,
   Player,
+  PlayerNote,
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
+
+// How many weeks of the visual calendar a Parent-membership viewer sees.
+// Free tier sees 1 (this week only, same bound as the list view below) —
+// the calendar is a rendering of the same paywalled history, not a new
+// data path around it.
+const CALENDAR_WEEKS_FULL = 12;
+const CALENDAR_WEEKS_FREE = 1;
 
 type PlayerProgress = {
   player: Player;
   streak: number;
   visibleHistory: CompletionHistoryEntry[];
   hasMoreHistory: boolean;
+  allDates: string[];
+  notes: PlayerNote[];
 };
 
 export default function ProgressScreen() {
@@ -34,7 +46,10 @@ export default function ProgressScreen() {
       const weekStart = mondayOfThisWeek();
       const data = await Promise.all(
         players.map(async (player) => {
-          const history = await getCompletionHistory(player.id);
+          const [history, notes] = await Promise.all([
+            getCompletionHistory(player.id),
+            getPlayerNotes(player.id),
+          ]);
           const dates = history.map((h) => h.date);
           const visibleHistory = hasParentTier ? history : history.filter((h) => h.date >= weekStart);
           return {
@@ -42,6 +57,8 @@ export default function ProgressScreen() {
             streak: calculateStreak(dates),
             visibleHistory,
             hasMoreHistory: !hasParentTier && history.length > visibleHistory.length,
+            allDates: dates,
+            notes,
           };
         })
       );
@@ -83,7 +100,7 @@ export default function ProgressScreen() {
       {progress.length === 0 ? (
         <Text style={styles.placeholder}>No players yet — add one from the Add a Player tab.</Text>
       ) : (
-        progress.map(({ player, streak, visibleHistory, hasMoreHistory }) => (
+        progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
             <View style={styles.streakCard}>
@@ -92,6 +109,22 @@ export default function ProgressScreen() {
                 {streak} {streak === 1 ? 'day' : 'days'}
               </Text>
             </View>
+
+            <StreakCalendar
+              completedDates={allDates}
+              weeks={hasParentTier ? CALENDAR_WEEKS_FULL : CALENDAR_WEEKS_FREE}
+            />
+
+            {notes.length > 0 ? (
+              <View style={styles.notesSection}>
+                {notes.map((n) => (
+                  <View key={n.updatedAt} style={styles.noteCard}>
+                    <Text style={styles.noteLabel}>Coach's note</Text>
+                    <Text style={styles.noteText}>{n.note}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
 
             <Text style={styles.historyLabel}>
               {hasParentTier ? 'Full history' : 'This week'}
@@ -155,6 +188,17 @@ const styles = StyleSheet.create({
   },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
+  notesSection: { gap: 8 },
+  noteCard: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: '#FFF8EA',
+    gap: 2,
+  },
+  noteLabel: { fontSize: 12, fontWeight: '700', color: colors.accentDark },
+  noteText: { fontSize: 14, color: colors.text, lineHeight: 20, marginTop: 2 },
   historyLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 4 },
   historyRow: {
     borderWidth: 1,
