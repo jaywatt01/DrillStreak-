@@ -278,6 +278,23 @@ export async function getCompletionDates(playerId: string): Promise<string[]> {
   return Array.from(new Set((data ?? []).map((c) => c.date as string)));
 }
 
+export type PlayerNote = { note: string; updatedAt: string };
+
+// Every coach note on this player, most recently updated first — a player
+// can be on multiple teams/coaches, so this can return more than one. Not
+// gated behind parent_tier (see player_notes RLS in schema.sql): coach
+// notes are coach-authored content about the player, not app-usage
+// history, so the free/parent-tier history paywall doesn't apply.
+export async function getPlayerNotes(playerId: string): Promise<PlayerNote[]> {
+  const { data, error } = await supabase
+    .from('player_notes')
+    .select('note, updated_at')
+    .eq('player_id', playerId)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ note: row.note as string, updatedAt: row.updated_at as string }));
+}
+
 export function calculateStreak(sortedDescendingDates: string[]): number {
   if (sortedDescendingDates.length === 0) return 0;
 

@@ -197,6 +197,54 @@ export async function getPromptForResultsForPlayer(playerId: string): Promise<bo
   return data === true;
 }
 
+// This coach's own note for a player — deliberately scoped to
+// coach_user_id = the caller, not just player_id, so a player on multiple
+// teams editing here can't see or overwrite a different coach's note (see
+// player_notes' unique(player_id, coach_user_id) and RLS in schema.sql).
+export async function getMyNoteForPlayer(playerId: string): Promise<string> {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) throw new Error('Not signed in');
+
+  const { data, error } = await supabase
+    .from('player_notes')
+    .select('note')
+    .eq('player_id', playerId)
+    .eq('coach_user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.note as string) ?? '';
+}
+
+// Upserts this coach's note for a player. Passing an empty/whitespace-only
+// note deletes the row instead — an empty note isn't a note worth keeping,
+// and this avoids leaving stale empty rows a player would otherwise see
+// rendered as a blank note.
+export async function saveMyNoteForPlayer(playerId: string, note: string): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) throw new Error('Not signed in');
+
+  const trimmed = note.trim();
+  if (!trimmed) {
+    const { error } = await supabase
+      .from('player_notes')
+      .delete()
+      .eq('player_id', playerId)
+      .eq('coach_user_id', userId);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase
+    .from('player_notes')
+    .upsert(
+      { player_id: playerId, coach_user_id: userId, note: trimmed, updated_at: new Date().toISOString() },
+      { onConflict: 'player_id,coach_user_id' }
+    );
+  if (error) throw error;
+}
+
 export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): Promise<RosterCompletion[]> {
   if (rosterPlayerIds.length === 0) return [];
 

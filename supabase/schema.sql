@@ -380,6 +380,73 @@ create policy completions_coach_read on completions
   );
 
 -- ---------------------------------------------------------------------------
+-- player_notes: a coach's own evolving note about a player on their roster
+-- (added 2026-08-14, part of the recruitment-layer build in DRILLSTREAK.md —
+-- see that file's "Recruitment/scholarship mechanism" section, Horizon 2).
+-- One row per (player, coach), not a feed — a coach's take on a player is
+-- meant to be edited over time, not logged as separate dated entries.
+-- Deliberately NOT gated behind parent_tier: this is coach-authored content
+-- about the player, not app-usage history, so the history paywall doesn't
+-- apply — matches "coach features are free, always" positioning everywhere
+-- else in this app.
+-- ---------------------------------------------------------------------------
+create table player_notes (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  coach_user_id uuid not null references auth.users(id),
+  note text not null,
+  updated_at timestamptz not null default now(),
+  unique (player_id, coach_user_id)
+);
+
+alter table player_notes enable row level security;
+
+-- Starting a note requires actually coaching this player right now — same
+-- team_memberships/teams join pattern already proven safe in
+-- players_access/completions_coach_read above, so no new recursion risk.
+create policy player_notes_coach_insert on player_notes
+  for insert
+  with check (
+    coach_user_id = auth.uid()
+    and exists (
+      select 1 from team_memberships tm
+      join teams t on t.id = tm.team_id
+      where tm.player_id = player_notes.player_id and t.coach_user_id = auth.uid()
+    )
+  );
+
+-- Managing an existing note is author-only, with no team-membership
+-- requirement — deliberately NOT the same condition as the insert policy
+-- above. Caught in review: if select/update/delete also required active
+-- team membership, removing a player from the roster would permanently
+-- lock the coach out of their own note (RLS would block their own
+-- SELECT/UPDATE/DELETE) while the player/guardian could still read it
+-- forever via player_notes_player_read below — an orphaned note with no
+-- way to ever edit or delete it. A coach keeps ownership of content they
+-- authored, same "profile/history stays intact after roster removal"
+-- behavior as the rest of the app (see removeFromRoster in lib/team.ts).
+create policy player_notes_coach_select on player_notes
+  for select
+  using (coach_user_id = auth.uid());
+
+create policy player_notes_coach_update on player_notes
+  for update
+  using (coach_user_id = auth.uid())
+  with check (coach_user_id = auth.uid());
+
+create policy player_notes_coach_delete on player_notes
+  for delete
+  using (coach_user_id = auth.uid());
+
+-- Read-only for the player's own owner/guardian — always visible (not tied
+-- to a specific team's coach-read date bound above; a note isn't usage
+-- history, so the completions_coach_read anti-paywall-bypass restriction
+-- doesn't apply here).
+create policy player_notes_player_read on player_notes
+  for select
+  using (is_player_owner_or_guardian(player_notes.player_id, auth.uid()));
+
+-- ---------------------------------------------------------------------------
 -- redeem_team_invite: lets a guardian/player join a team by invite code
 -- without exposing the teams table to broad SELECT. Runs as security
 -- definer so it can look up the team by code, but re-checks the caller
@@ -947,3 +1014,48 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- grant execute on function get_player_challenges(uuid) to authenticated;
 --
 -- update challenges set accepted = false, accepted_at = null, starts_at = null, ends_at = null;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-14): player_notes,
+-- part of the recruitment-layer build (Horizon 2 in DRILLSTREAK.md). Run
+-- this against the live project via the Supabase SQL editor. No data loss
+-- — this is a brand-new table, nothing existing is touched.
+-- ---------------------------------------------------------------------------
+-- create table player_notes (
+--   id uuid primary key default gen_random_uuid(),
+--   player_id uuid not null references players(id) on delete cascade,
+--   coach_user_id uuid not null references auth.users(id),
+--   note text not null,
+--   updated_at timestamptz not null default now(),
+--   unique (player_id, coach_user_id)
+-- );
+--
+-- alter table player_notes enable row level security;
+--
+-- create policy player_notes_coach_insert on player_notes
+--   for insert
+--   with check (
+--     coach_user_id = auth.uid()
+--     and exists (
+--       select 1 from team_memberships tm
+--       join teams t on t.id = tm.team_id
+--       where tm.player_id = player_notes.player_id and t.coach_user_id = auth.uid()
+--     )
+--   );
+--
+-- create policy player_notes_coach_select on player_notes
+--   for select
+--   using (coach_user_id = auth.uid());
+--
+-- create policy player_notes_coach_update on player_notes
+--   for update
+--   using (coach_user_id = auth.uid())
+--   with check (coach_user_id = auth.uid());
+--
+-- create policy player_notes_coach_delete on player_notes
+--   for delete
+--   using (coach_user_id = auth.uid());
+--
+-- create policy player_notes_player_read on player_notes
+--   for select
+--   using (is_player_owner_or_guardian(player_notes.player_id, auth.uid()));
