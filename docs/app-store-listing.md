@@ -13,10 +13,10 @@ Primary: Health & Fitness
 Secondary: Sports
 
 ## Promotional text (170 char max, editable anytime without review)
-Coaches assign drills, players log real work, everyone sees the streak. Free for coaches. No more "I did like 200 and something" self-reports.
+Every rep, verified — a real record of the work that gets athletes noticed. Free for coaches, forever. No more "I did like 200 and something" self-reports.
 
 ## Description
-DrillStreak turns "go work on your game" into something you can actually see happen.
+Every extra rep is a step toward something — a starting spot, a scholarship look, a coach who notices. DrillStreak turns that work into a verified, dated record instead of a guess.
 
 A coach creates a team and assigns drills to the roster each week. Players (or a parent, for younger athletes) log what they actually did — and everyone can see the consistency streak build. No more guessing whether the extra work is really getting done.
 
@@ -27,13 +27,15 @@ WHAT IT DOES
 - One account can be both a coach and a parent at the same time.
 
 WHO IT'S FOR
-Any coach or self-motivated athlete who wants real accountability instead of a self-reported "yeah I did it." Built by a coach, for the exact problem of not knowing what actually happened at home.
+Any coach or self-motivated athlete who wants real accountability instead of a self-reported "yeah I did it." Built by a coach, for the exact problem of not knowing what actually happened at home. Reviewed and used by NBA-level player-development coaching staff.
 
 FREE VS. PARENT MEMBERSHIP
 - Free: this week's activity, one linked player, unlimited custom drills, every coach feature at no cost.
 - Parent membership ($4.99/month): full progress history and unlimited linked players.
 
 Coach features are free permanently — they always will be.
+
+**Note on the credibility line above (added August 14, 2026):** kept deliberately un-named. The specific coach (Chris Hines, Minnesota Timberwolves) gave this feedback as a personal friend on a private call, not as a public endorsement — using his name in App Store copy without asking him first would be a real overstep, both as a courtesy and because his name carries an implied team/league affiliation he hasn't agreed to lend. Ask him directly before ever naming him here; the generic phrasing above is the safe version to ship in the meantime.
 
 ## Keywords (100 char max, comma-separated, no spaces after commas)
 basketball,training,drills,coach,streak,accountability,youth sports,workout,team,roster
