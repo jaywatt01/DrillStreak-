@@ -15,6 +15,20 @@ import {
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
 
+// Joins whichever bio fields are actually set into one line — e.g.
+// "Point Guard · 6'2" · 165 lbs · Class of 2027". Skips anything blank
+// rather than showing an empty placeholder, and returns null (render
+// nothing) if none of the four fields are filled in yet.
+function formatPlayerBio(player: Player): string | null {
+  const parts = [
+    player.position,
+    player.height,
+    player.weight,
+    player.grad_year != null ? `Class of ${player.grad_year}` : null,
+  ].filter((p): p is string => !!p);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
 // the calendar is a rendering of the same paywalled history, not a new
@@ -103,6 +117,9 @@ export default function ProgressScreen() {
         progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
+            {formatPlayerBio(player) ? (
+              <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
+            ) : null}
             <View style={styles.streakCard}>
               <Text style={styles.streakLabel}>Current streak</Text>
               <Text style={styles.streakValue}>
@@ -181,6 +198,7 @@ const styles = StyleSheet.create({
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   playerSection: { gap: 8, marginBottom: 8 },
   playerName: { fontSize: 20, fontWeight: '700', color: colors.text },
+  playerBio: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: -4 },
   streakCard: {
     backgroundColor: colors.primary,
     borderRadius: 16,
