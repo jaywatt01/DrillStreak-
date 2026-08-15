@@ -1,5 +1,6 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme/colors';
+import { localDateString } from '../lib/date';
 
 // Visual consistency record — reads in two seconds instead of a raw
 // number, per the recruitment-layer plan in DRILLSTREAK.md (Horizon 2:
@@ -18,10 +19,6 @@ function startOfWeek(date: Date): Date {
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() - d.getDay());
   return d;
-}
-
-function toDateString(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }
 
 type Cell = { date: string; done: boolean; isFuture: boolean };
@@ -44,7 +41,7 @@ export default function StreakCalendar({ completedDates, weeks = 12 }: Props) {
     for (let d = 0; d < 7; d++) {
       const cellDate = new Date(gridStart);
       cellDate.setDate(cellDate.getDate() + w * 7 + d);
-      const dateStr = toDateString(cellDate);
+      const dateStr = localDateString(cellDate);
       col.push({ date: dateStr, done: completed.has(dateStr), isFuture: cellDate > today });
     }
     columns.push(col);

@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { mondayOfThisWeek, todayDateString, weekIndex } from './date';
+import { localDateString, mondayOfThisWeek, todayDateString, weekIndex } from './date';
 
 // height/weight are free text (e.g. "6'2\"", "165 lbs") rather than a
 // structured unit — matches this app's low-friction self-report philosophy
@@ -327,9 +327,9 @@ export function calculateStreak(sortedDescendingDates: string[]): number {
   if (sortedDescendingDates.length === 0) return 0;
 
   const today = todayDateString();
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = localDateString(yesterdayDate);
 
   const mostRecent = sortedDescendingDates[0];
   if (mostRecent !== today && mostRecent !== yesterdayStr) {
@@ -337,10 +337,15 @@ export function calculateStreak(sortedDescendingDates: string[]): number {
   }
 
   let streak = 1;
-  let cursor = new Date(mostRecent);
+  // Built from the parsed year/month/day, not `new Date(mostRecent)` —
+  // parsing a bare "YYYY-MM-DD" string parses it as UTC midnight per the
+  // JS spec, not local midnight, which is exactly the class of bug fixed
+  // in lib/date.ts (see localDateString's comment).
+  const [mostRecentYear, mostRecentMonth, mostRecentDay] = mostRecent.split('-').map(Number);
+  let cursor = new Date(mostRecentYear, mostRecentMonth - 1, mostRecentDay);
   for (let i = 1; i < sortedDescendingDates.length; i++) {
     cursor.setDate(cursor.getDate() - 1);
-    const expected = cursor.toISOString().slice(0, 10);
+    const expected = localDateString(cursor);
     if (sortedDescendingDates[i] === expected) {
       streak++;
     } else {
