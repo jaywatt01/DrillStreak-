@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import {
@@ -29,6 +29,23 @@ export default function AccountScreen() {
     } finally {
       setPurchasing(false);
     }
+  };
+
+  // Apple requires cancellation to go through the platform's own
+  // subscription management, not the app itself — this deep-links
+  // straight to the right screen instead of making someone hunt through
+  // Settings. itms-apps:// is iOS-specific; falls back to the Play
+  // Store's subscriptions list on Android, since RevenueCat/App Store is
+  // the only storefront actually shipping today but this shouldn't go
+  // dead if that ever changes.
+  const handleManageSubscription = () => {
+    const url =
+      Platform.OS === 'ios'
+        ? 'itms-apps://apps.apple.com/account/subscriptions'
+        : 'https://play.google.com/store/account/subscriptions';
+    Linking.openURL(url).catch(() =>
+      Alert.alert('Could not open subscription settings', 'Open your device Settings app and look under Subscriptions.')
+    );
   };
 
   const handleRestore = async () => {
@@ -99,6 +116,12 @@ export default function AccountScreen() {
           </Pressable>
         ) : null}
 
+        {hasParentTier && !entitlementLoading ? (
+          <Pressable style={styles.manageButton} onPress={handleManageSubscription}>
+            <Text style={styles.manageButtonText}>Manage Subscription</Text>
+          </Pressable>
+        ) : null}
+
         {/* Apple App Review guideline 3.1.2 subscription disclosure —
             required near the purchase button, only while it's showing. */}
         {!hasParentTier && !entitlementLoading ? (
@@ -166,6 +189,15 @@ const styles = StyleSheet.create({
   buttonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   restoreLink: { alignSelf: 'center', marginTop: 10 },
   restoreLinkText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  manageButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  manageButtonText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
   disclosureText: { fontSize: 11, color: colors.textMuted, lineHeight: 16, marginTop: 12 },
   disclosureLink: { color: colors.primary, fontWeight: '600' },
   signOutButton: {
