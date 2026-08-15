@@ -34,11 +34,13 @@ type ShootingComposite = { makes: number; attempts: number };
 // Sums every logged completion that has BOTH makes and attempts set — that
 // pair is what marks an entry as shooting-type data (a rep-only drill like
 // suicides or jump rope logs attempts alone, with makes left null, so it's
-// correctly excluded here). Computed from whatever history the viewer is
-// currently allowed to see (visibleHistory, already tier-gated), not the
-// unrestricted full history — same paywall boundary as everything else on
-// this screen, not a back door around it. Returns null (render nothing)
-// if no shooting-type data has been logged at all yet.
+// excluded here — it gets its own tally instead, via computeRepTallies
+// below, since there's no "make" for a sprint or a jump-rope rep and a
+// percentage wouldn't mean anything for it). Computed from whatever
+// history the viewer is currently allowed to see (visibleHistory, already
+// tier-gated), not the unrestricted full history — same paywall boundary
+// as everything else on this screen, not a back door around it. Returns
+// null (render nothing) if no shooting-type data has been logged yet.
 function computeShootingComposite(history: CompletionHistoryEntry[]): ShootingComposite | null {
   let makes = 0;
   let attempts = 0;
@@ -51,6 +53,31 @@ function computeShootingComposite(history: CompletionHistoryEntry[]): ShootingCo
     }
   }
   return attempts > 0 ? { makes, attempts } : null;
+}
+
+type RepTally = { drillName: string; totalAttempts: number };
+
+// The counterpart to computeShootingComposite above: totals attempts for
+// every drill logged WITHOUT a makes value — jump rope reps, suicides,
+// sprints, anything that's a rep count rather than a makes/attempts pair.
+// Grouped and summed per drill name, most-logged drill first. A drill
+// with a mix of makes/attempts entries AND attempts-only entries (unusual,
+// but not prevented at the data layer) only contributes its attempts-only
+// entries here — the makes/attempts ones are already counted in the
+// shooting composite, and double-counting either way would overstate one
+// of the two numbers.
+function computeRepTallies(history: CompletionHistoryEntry[]): RepTally[] {
+  const totals = new Map<string, number>();
+  for (const entry of history) {
+    for (const drill of entry.drills) {
+      if (drill.attempts != null && drill.makes == null) {
+        totals.set(drill.name, (totals.get(drill.name) ?? 0) + drill.attempts);
+      }
+    }
+  }
+  return Array.from(totals.entries())
+    .map(([drillName, totalAttempts]) => ({ drillName, totalAttempts }))
+    .sort((a, b) => b.totalAttempts - a.totalAttempts);
 }
 
 // How many weeks of the visual calendar a Parent-membership viewer sees.
@@ -68,6 +95,7 @@ type PlayerProgress = {
   allDates: string[];
   notes: PlayerNote[];
   shooting: ShootingComposite | null;
+  repTallies: RepTally[];
 };
 
 export default function ProgressScreen() {
@@ -99,6 +127,7 @@ export default function ProgressScreen() {
             allDates: dates,
             notes,
             shooting: computeShootingComposite(visibleHistory),
+            repTallies: computeRepTallies(visibleHistory),
           };
         })
       );
@@ -142,7 +171,7 @@ export default function ProgressScreen() {
       {progress.length === 0 ? (
         <Text style={styles.placeholder}>No players yet — add one from the Add a Player tab.</Text>
       ) : (
-        progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes, shooting }) => (
+        progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes, shooting, repTallies }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
             {formatPlayerBio(player) ? (
@@ -168,6 +197,20 @@ export default function ProgressScreen() {
                     {Math.round((shooting.makes / shooting.attempts) * 100)}%
                   </Text>
                 </View>
+              </View>
+            ) : null}
+
+            {repTallies.length > 0 ? (
+              <View style={styles.repTalliesCard}>
+                <Text style={styles.repTalliesLabel}>
+                  Total reps {hasParentTier ? '(all-time)' : '(this week)'}
+                </Text>
+                {repTallies.map((t) => (
+                  <View key={t.drillName} style={styles.repTallyRow}>
+                    <Text style={styles.repTallyName}>{t.drillName}</Text>
+                    <Text style={styles.repTallyValue}>{t.totalAttempts}</Text>
+                  </View>
+                ))}
               </View>
             ) : null}
 
@@ -255,6 +298,18 @@ const styles = StyleSheet.create({
   },
   shootingRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 4 },
   shootingPercent: { color: colors.accent, fontSize: 20, fontWeight: '700' },
+  repTalliesCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: colors.surface,
+    gap: 6,
+  },
+  repTalliesLabel: { fontSize: 13, fontWeight: '700', color: colors.textMuted },
+  repTallyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  repTallyName: { fontSize: 14, color: colors.text, flex: 1, marginRight: 12 },
+  repTallyValue: { fontSize: 14, fontWeight: '700', color: colors.primary },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
   notesSection: { gap: 8 },
