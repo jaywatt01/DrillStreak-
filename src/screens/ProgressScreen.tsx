@@ -29,6 +29,30 @@ function formatPlayerBio(player: Player): string | null {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
+type ShootingComposite = { makes: number; attempts: number };
+
+// Sums every logged completion that has BOTH makes and attempts set — that
+// pair is what marks an entry as shooting-type data (a rep-only drill like
+// suicides or jump rope logs attempts alone, with makes left null, so it's
+// correctly excluded here). Computed from whatever history the viewer is
+// currently allowed to see (visibleHistory, already tier-gated), not the
+// unrestricted full history — same paywall boundary as everything else on
+// this screen, not a back door around it. Returns null (render nothing)
+// if no shooting-type data has been logged at all yet.
+function computeShootingComposite(history: CompletionHistoryEntry[]): ShootingComposite | null {
+  let makes = 0;
+  let attempts = 0;
+  for (const entry of history) {
+    for (const drill of entry.drills) {
+      if (drill.makes != null && drill.attempts != null) {
+        makes += drill.makes;
+        attempts += drill.attempts;
+      }
+    }
+  }
+  return attempts > 0 ? { makes, attempts } : null;
+}
+
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
 // the calendar is a rendering of the same paywalled history, not a new
@@ -43,6 +67,7 @@ type PlayerProgress = {
   hasMoreHistory: boolean;
   allDates: string[];
   notes: PlayerNote[];
+  shooting: ShootingComposite | null;
 };
 
 export default function ProgressScreen() {
@@ -73,6 +98,7 @@ export default function ProgressScreen() {
             hasMoreHistory: !hasParentTier && history.length > visibleHistory.length,
             allDates: dates,
             notes,
+            shooting: computeShootingComposite(visibleHistory),
           };
         })
       );
@@ -116,7 +142,7 @@ export default function ProgressScreen() {
       {progress.length === 0 ? (
         <Text style={styles.placeholder}>No players yet — add one from the Add a Player tab.</Text>
       ) : (
-        progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes }) => (
+        progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes, shooting }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
             {formatPlayerBio(player) ? (
@@ -128,6 +154,22 @@ export default function ProgressScreen() {
                 {streak} {streak === 1 ? 'day' : 'days'}
               </Text>
             </View>
+
+            {shooting ? (
+              <View style={styles.shootingCard}>
+                <Text style={styles.streakLabel}>
+                  Shooting {hasParentTier ? '(all-time)' : '(this week)'}
+                </Text>
+                <View style={styles.shootingRow}>
+                  <Text style={styles.streakValue}>
+                    {shooting.makes}/{shooting.attempts}
+                  </Text>
+                  <Text style={styles.shootingPercent}>
+                    {Math.round((shooting.makes / shooting.attempts) * 100)}%
+                  </Text>
+                </View>
+              </View>
+            ) : null}
 
             <StreakCalendar
               completedDates={allDates}
@@ -206,6 +248,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
   },
+  shootingCard: {
+    backgroundColor: colors.primaryDark,
+    borderRadius: 16,
+    padding: 20,
+  },
+  shootingRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 4 },
+  shootingPercent: { color: colors.accent, fontSize: 20, fontWeight: '700' },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
   notesSection: { gap: 8 },
