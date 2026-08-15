@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import {
   calculateStreak,
@@ -133,9 +133,17 @@ export default function HomeScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // useFocusEffect, not useEffect — a tab navigator keeps every screen
+  // mounted in the background, so a plain useEffect only ever fires once
+  // on first mount. That's why switching tabs never showed a change made
+  // elsewhere (a new player, a new team, a logged drill) without a manual
+  // pull-to-refresh — this re-loads every time the tab is actually
+  // navigated to, not just the first time.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);

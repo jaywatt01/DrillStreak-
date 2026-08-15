@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
 import StreakCalendar from '../components/StreakCalendar';
@@ -85,9 +85,11 @@ export default function ProgressScreen() {
     }
   }, [hasParentTier]);
 
-  useEffect(() => {
-    if (!entitlementLoading) load();
-  }, [load, entitlementLoading]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!entitlementLoading) load();
+    }, [load, entitlementLoading])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);

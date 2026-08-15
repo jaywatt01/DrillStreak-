@@ -1,15 +1,33 @@
+// The device's own local calendar day as "YYYY-MM-DD" — deliberately NOT
+// via .toISOString(), which converts to UTC first. Real bug found
+// 2026-08-15: a drill logged in the evening in a US timezone landed under
+// tomorrow's UTC date (todayDateString used to be `new
+// Date().toISOString().slice(0,10)`), while the streak calendar computed
+// "today" from local midnight — the two disagreed every evening, so a
+// same-day completion could show in history/streak (both driven by the
+// same UTC-based "today") but never light up on the calendar (driven by
+// local-calendar "today"), or land on a cell hidden as a future date.
+// getFullYear/getMonth/getDate are local-time accessors in JS, so building
+// the string from them sidesteps the UTC conversion entirely — every
+// date-as-string in this app should go through this, not .toISOString().
+export function localDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function mondayOfThisWeek(): string {
   const now = new Date();
   const day = now.getDay(); // 0 = Sunday, 1 = Monday, ...
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = new Date(now);
   monday.setDate(now.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-  return monday.toISOString().slice(0, 10);
+  return localDateString(monday);
 }
 
 export function todayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateString(new Date());
 }
 
 // A stable, ever-incrementing week number, ticking over every Monday —
