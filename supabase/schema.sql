@@ -22,7 +22,21 @@ create table players (
   id uuid primary key default gen_random_uuid(),
   display_name text not null,
   created_by_user_id uuid not null references auth.users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Added 2026-08-14, part of the recruitment-layer build (Horizon 2 in
+  -- DRILLSTREAK.md): the bio fields a real recruiting profile needs
+  -- alongside activity data. All nullable/optional — same trust model as
+  -- everything else in this app (self-reported, no verification). height/
+  -- weight are free text ("6'2\"", "165 lbs"), not a structured unit — see
+  -- the Player type comment in lib/players.ts for why. position is free
+  -- text too, not a fixed enum, since the app is deliberately
+  -- sport-agnostic. No new RLS needed — players_access already covers
+  -- these (same rows, new columns, same pattern as the 2026-07-24
+  -- estimated_minutes/scheduled_time migration above).
+  height text,
+  weight text,
+  grad_year integer,
+  position text
 );
 
 -- guardianships: lets a second account (e.g. the other parent) access a
@@ -1059,3 +1073,14 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- create policy player_notes_player_read on player_notes
 --   for select
 --   using (is_player_owner_or_guardian(player_notes.player_id, auth.uid()));
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-14, same batch):
+-- recruiting-profile bio fields on players. Run this in the same session
+-- as the player_notes migration above. No data loss — all four columns
+-- are nullable, every existing player row just gets them as null.
+-- ---------------------------------------------------------------------------
+-- alter table players add column height text;
+-- alter table players add column weight text;
+-- alter table players add column grad_year integer;
+-- alter table players add column position text;

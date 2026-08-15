@@ -24,7 +24,7 @@ import {
   listMyPlayers,
   Player,
   renameDrill,
-  renamePlayer,
+  updatePlayerProfile,
 } from '../lib/players';
 import { joinTeamByInviteCode } from '../lib/team';
 
@@ -42,6 +42,10 @@ export default function AddPlayerScreen() {
 
   const [renamingPlayerId, setRenamingPlayerId] = useState<string | null>(null);
   const [renamePlayerText, setRenamePlayerText] = useState('');
+  const [editHeight, setEditHeight] = useState('');
+  const [editWeight, setEditWeight] = useState('');
+  const [editGradYear, setEditGradYear] = useState('');
+  const [editPosition, setEditPosition] = useState('');
   const [savingPlayerEdit, setSavingPlayerEdit] = useState(false);
 
   const [inviteCode, setInviteCode] = useState('');
@@ -135,10 +139,14 @@ export default function AddPlayerScreen() {
   const handleLongPressPlayer = (player: Player) => {
     Alert.alert(player.display_name, 'What would you like to do?', [
       {
-        text: 'Rename',
+        text: 'Edit Profile',
         onPress: () => {
           setRenamingPlayerId(player.id);
           setRenamePlayerText(player.display_name);
+          setEditHeight(player.height ?? '');
+          setEditWeight(player.weight ?? '');
+          setEditGradYear(player.grad_year != null ? String(player.grad_year) : '');
+          setEditPosition(player.position ?? '');
         },
       },
       {
@@ -170,16 +178,23 @@ export default function AddPlayerScreen() {
     ]);
   };
 
-  const handleSavePlayerRename = async () => {
+  const handleSaveProfileEdit = async () => {
     if (!renamingPlayerId || !renamePlayerText.trim()) return;
+    const parsedGradYear = parseInt(editGradYear, 10);
     setSavingPlayerEdit(true);
     setPlayerError(null);
     try {
-      await renamePlayer(renamingPlayerId, renamePlayerText.trim());
+      await updatePlayerProfile(renamingPlayerId, {
+        displayName: renamePlayerText.trim(),
+        height: editHeight.trim() || null,
+        weight: editWeight.trim() || null,
+        gradYear: editGradYear.trim() && Number.isFinite(parsedGradYear) ? parsedGradYear : null,
+        position: editPosition.trim() || null,
+      });
       setRenamingPlayerId(null);
       await load();
     } catch (e) {
-      setPlayerError(e instanceof Error ? e.message : 'Failed to rename player.');
+      setPlayerError(e instanceof Error ? e.message : 'Failed to save profile.');
     } finally {
       setSavingPlayerEdit(false);
     }
@@ -313,7 +328,7 @@ export default function AddPlayerScreen() {
           <Text style={styles.placeholder}>
             Tap a player to select them — joining a team and adding a custom
             drill below both apply to whoever's selected. Long-press a
-            player to rename or delete them.
+            player to edit their profile or delete them.
           </Text>
           <View style={styles.chipRow}>
             {players.map((p) => (
@@ -343,6 +358,38 @@ export default function AddPlayerScreen() {
             placeholder="Player name"
             placeholderTextColor={colors.textMuted}
           />
+          <Text style={styles.editRowLabel}>
+            Optional — shows on their profile in Progress, blank fields just don't show.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={editPosition}
+            onChangeText={setEditPosition}
+            placeholder="Position (e.g. Point Guard)"
+            placeholderTextColor={colors.textMuted}
+          />
+          <TextInput
+            style={styles.input}
+            value={editHeight}
+            onChangeText={setEditHeight}
+            placeholder={'Height (e.g. 6\'2")'}
+            placeholderTextColor={colors.textMuted}
+          />
+          <TextInput
+            style={styles.input}
+            value={editWeight}
+            onChangeText={setEditWeight}
+            placeholder="Weight (e.g. 165 lbs)"
+            placeholderTextColor={colors.textMuted}
+          />
+          <TextInput
+            style={styles.input}
+            value={editGradYear}
+            onChangeText={setEditGradYear}
+            placeholder="Graduation year (e.g. 2027)"
+            placeholderTextColor={colors.textMuted}
+            keyboardType="number-pad"
+          />
           <View style={styles.editButtonRow}>
             <Pressable
               style={[styles.smallButton, styles.smallButtonSecondary]}
@@ -355,7 +402,7 @@ export default function AddPlayerScreen() {
                 styles.smallButton,
                 (!renamePlayerText.trim() || savingPlayerEdit) && styles.buttonDisabled,
               ]}
-              onPress={handleSavePlayerRename}
+              onPress={handleSaveProfileEdit}
               disabled={!renamePlayerText.trim() || savingPlayerEdit}
             >
               {savingPlayerEdit ? (
@@ -584,6 +631,7 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#FFF8EA',
   },
+  editRowLabel: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   editButtonRow: { flexDirection: 'row', gap: 8 },
   smallButton: {
     flex: 1,

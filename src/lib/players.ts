@@ -1,10 +1,22 @@
 import { supabase } from './supabase';
 import { mondayOfThisWeek, todayDateString, weekIndex } from './date';
 
+// height/weight are free text (e.g. "6'2\"", "165 lbs") rather than a
+// structured unit — matches this app's low-friction self-report philosophy
+// everywhere else (completions, makes/attempts) rather than forcing a
+// unit-conversion decision. position is free text too, not a fixed enum —
+// the app is deliberately sport-agnostic (see the Theme section in
+// DRILLSTREAK.md), and a basketball-specific position list would break that.
 export type Player = {
   id: string;
   display_name: string;
+  height: string | null;
+  weight: string | null;
+  grad_year: number | null;
+  position: string | null;
 };
+
+export const PLAYER_SELECT_COLUMNS = 'id, display_name, height, weight, grad_year, position';
 
 // Fallback event length for any drill with no set duration (custom or
 // seeded). 30, not 60 — most drills in the seeded library run 5-10 min,
@@ -55,16 +67,32 @@ export async function addPlayer(displayName: string): Promise<Player> {
   const { data, error } = await supabase
     .from('players')
     .insert({ display_name: displayName, created_by_user_id: userId })
-    .select('id, display_name')
+    .select(PLAYER_SELECT_COLUMNS)
     .single();
   if (error) throw error;
   return data as Player;
 }
 
-export async function renamePlayer(playerId: string, displayName: string): Promise<void> {
+export type PlayerProfileUpdate = {
+  displayName: string;
+  height: string | null;
+  weight: string | null;
+  gradYear: number | null;
+  position: string | null;
+};
+
+// Replaces the old narrower renamePlayer — same call site (AddPlayerScreen's
+// player edit form), now covering the recruitment-profile bio fields too.
+export async function updatePlayerProfile(playerId: string, update: PlayerProfileUpdate): Promise<void> {
   const { error } = await supabase
     .from('players')
-    .update({ display_name: displayName })
+    .update({
+      display_name: update.displayName,
+      height: update.height,
+      weight: update.weight,
+      grad_year: update.gradYear,
+      position: update.position,
+    })
     .eq('id', playerId);
   if (error) throw error;
 }
