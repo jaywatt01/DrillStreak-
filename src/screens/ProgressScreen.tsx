@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
@@ -70,6 +70,28 @@ function computeMakesAttemptsTotal(
   return attempts > 0 ? { makes, attempts } : null;
 }
 
+type ShootingBreakdownEntry = { date: string; drillName: string; makes: number; attempts: number };
+
+// The per-entry counterpart to computeMakesAttemptsTotal — same matching
+// logic, but returns the individual contributing rows instead of a sum, so
+// tapping a Free Throws/Shooting card can show exactly which days and
+// drills made up that total. `history` is already ordered most-recent-day
+// first (see getCompletionHistory), so no re-sort needed here.
+function computeShootingBreakdown(
+  history: CompletionHistoryEntry[],
+  matches: (drillName: string) => boolean
+): ShootingBreakdownEntry[] {
+  const entries: ShootingBreakdownEntry[] = [];
+  for (const entry of history) {
+    for (const drill of entry.drills) {
+      if (drill.makes != null && drill.attempts != null && matches(drill.name)) {
+        entries.push({ date: entry.date, drillName: drill.name, makes: drill.makes, attempts: drill.attempts });
+      }
+    }
+  }
+  return entries;
+}
+
 type RepTally = { drillName: string; totalAttempts: number };
 
 // The counterpart to computeShootingComposite above: totals attempts for
@@ -121,6 +143,7 @@ export default function ProgressScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [progress, setProgress] = useState<PlayerProgress[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<{ title: string; entries: ShootingBreakdownEntry[] } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -168,6 +191,14 @@ export default function ProgressScreen() {
     load();
   };
 
+  const openBreakdown = (
+    title: string,
+    history: CompletionHistoryEntry[],
+    matches: (drillName: string) => boolean
+  ) => {
+    setBreakdown({ title, entries: computeShootingBreakdown(history, matches) });
+  };
+
   if (loading || entitlementLoading) {
     return (
       <View style={styles.centered}>
@@ -202,9 +233,12 @@ export default function ProgressScreen() {
             </View>
 
             {freeThrows ? (
-              <View style={styles.shootingCard}>
+              <Pressable
+                style={styles.shootingCard}
+                onPress={() => openBreakdown(`${player.display_name} — Free Throws`, visibleHistory, isFreeThrowDrill)}
+              >
                 <Text style={styles.streakLabel}>
-                  Free Throws {hasParentTier ? '(all-time)' : '(this week)'}
+                  Free Throws {hasParentTier ? '(all-time)' : '(this week)'} · tap for detail
                 </Text>
                 <View style={styles.shootingRow}>
                   <Text style={styles.streakValue}>
@@ -214,13 +248,18 @@ export default function ProgressScreen() {
                     {Math.round((freeThrows.makes / freeThrows.attempts) * 100)}%
                   </Text>
                 </View>
-              </View>
+              </Pressable>
             ) : null}
 
             {shooting ? (
-              <View style={styles.shootingCard}>
+              <Pressable
+                style={styles.shootingCard}
+                onPress={() =>
+                  openBreakdown(`${player.display_name} — Shooting`, visibleHistory, (name) => !isFreeThrowDrill(name))
+                }
+              >
                 <Text style={styles.streakLabel}>
-                  Shooting {hasParentTier ? '(all-time)' : '(this week)'}
+                  Shooting {hasParentTier ? '(all-time)' : '(this week)'} · tap for detail
                 </Text>
                 <View style={styles.shootingRow}>
                   <Text style={styles.streakValue}>
@@ -230,7 +269,7 @@ export default function ProgressScreen() {
                     {Math.round((shooting.makes / shooting.attempts) * 100)}%
                   </Text>
                 </View>
-              </View>
+              </Pressable>
             ) : null}
 
             {repTallies.length > 0 ? (
@@ -305,6 +344,39 @@ export default function ProgressScreen() {
           </View>
         ))
       )}
+
+      <Modal
+        visible={breakdown != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBreakdown(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{breakdown?.title}</Text>
+            <ScrollView style={styles.breakdownList}>
+              {breakdown?.entries.length === 0 ? (
+                <Text style={styles.placeholder}>Nothing logged yet.</Text>
+              ) : (
+                breakdown?.entries.map((e, i) => (
+                  <View key={`${e.date}-${e.drillName}-${i}`} style={styles.breakdownRow}>
+                    <View style={styles.breakdownRowText}>
+                      <Text style={styles.breakdownDate}>{e.date}</Text>
+                      <Text style={styles.breakdownDrill}>{e.drillName}</Text>
+                    </View>
+                    <Text style={styles.breakdownResult}>
+                      {e.makes}/{e.attempts}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+            <Pressable style={styles.smallButton} onPress={() => setBreakdown(null)}>
+              <Text style={styles.smallButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -378,4 +450,42 @@ const styles = StyleSheet.create({
   upsellTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
   upsellBody: { fontSize: 13, color: colors.textMuted, lineHeight: 18 },
   upsellLink: { fontSize: 13, fontWeight: '700', color: colors.primary, marginTop: 2 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    gap: 12,
+    maxHeight: '80%',
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
+  breakdownList: { maxHeight: 400 },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.background,
+    marginBottom: 8,
+  },
+  breakdownRowText: { flex: 1, marginRight: 12 },
+  breakdownDate: { fontSize: 13, fontWeight: '700', color: colors.text },
+  breakdownDrill: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  breakdownResult: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  smallButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
 });
