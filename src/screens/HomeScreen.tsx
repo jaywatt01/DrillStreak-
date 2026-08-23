@@ -16,6 +16,7 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
+import RecordClipModal from '../components/RecordClipModal';
 import {
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
@@ -99,6 +100,7 @@ export default function HomeScreen() {
   const [loadingTeammates, setLoadingTeammates] = useState(false);
   const [creatingChallengeId, setCreatingChallengeId] = useState<string | null>(null);
   const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [recordingFor, setRecordingFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -201,6 +203,26 @@ export default function HomeScreen() {
     setResultMakes(existing?.makes != null ? String(existing.makes) : '');
     setResultAttempts(existing?.attempts != null ? String(existing.attempts) : '');
     setLoggingResultFor({ playerId, drill });
+  };
+
+  // After a clip is saved (to the device's own Photos, never to DrillStreak
+  // — see RecordClipModal), ensure the drill is marked done — logCompletion
+  // is an upsert with ignoreDuplicates, so calling it on an already-done
+  // drill is a safe no-op — then open the same result modal used
+  // everywhere else, blank rather than prefilled, since this is a fresh
+  // count from footage just watched, not an edit of a prior number.
+  const handleRecordSaved = async () => {
+    if (!recordingFor) return;
+    const { playerId, drill } = recordingFor;
+    setRecordingFor(null);
+    try {
+      await logCompletion(playerId, drill.id);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not mark drill done', e instanceof Error ? e.message : 'Something went wrong.');
+      return;
+    }
+    openResultLogger(playerId, drill, undefined);
   };
 
   const handleSaveResult = async () => {
@@ -341,6 +363,7 @@ export default function HomeScreen() {
   }
 
   return (
+    <>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -497,6 +520,13 @@ export default function HomeScreen() {
                         <Text style={styles.iconButtonText}>▶️</Text>
                       </Pressable>
                     ) : null}
+                    <Pressable
+                      style={styles.iconButton}
+                      onPress={() => setRecordingFor({ playerId: player.id, drill })}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.iconButtonText}>🎥</Text>
+                    </Pressable>
                     {done ? (
                       <Pressable
                         style={styles.iconButton}
@@ -674,6 +704,13 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </ScrollView>
+    <RecordClipModal
+      visible={recordingFor != null}
+      drillName={recordingFor?.drill.name ?? null}
+      onClose={() => setRecordingFor(null)}
+      onSaved={handleRecordSaved}
+    />
+    </>
   );
 }
 
