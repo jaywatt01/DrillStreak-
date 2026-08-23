@@ -37,7 +37,22 @@
         {
           "calendarPermission": "Allow DrillStreak to add drill events to your calendar."
         }
-      ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "DrillStreak uses your camera to record training clips you can watch back to count makes and attempts.",
+          "microphonePermission": "DrillStreak records audio along with your training clips."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "DrillStreak saves your recorded training clips to your Photos — it never keeps a copy itself.",
+          "savePhotosPermission": "DrillStreak saves your recorded training clips to your Photos — it never keeps a copy itself."
+        }
+      ],
+      "expo-video"
     ]
   }
 }
