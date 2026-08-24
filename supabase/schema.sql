@@ -36,7 +36,19 @@ create table players (
   height text,
   weight text,
   grad_year integer,
-  position text
+  position text,
+  -- Added 2026-08-24: does this player row represent the account holder
+  -- themselves (an adult self-tracker, OR a 13-17-year-old who signed up
+  -- for their own account under the age gate), or a kid a parent is
+  -- managing? Set once at creation (AddPlayerScreen), never inferred —
+  -- there's no reliable way to tell the two apart from existing data
+  -- alone (an adult and a self-signed-up teen both pass the same age
+  -- gate). Drives is_player_restricted() below: an account whose ENTIRE
+  -- roster presence on a team is self-tracked profiles (never a kid
+  -- they're managing) gets the Team Chat restriction Jay asked for —
+  -- can read the team-wide feed, can only ever message the coach
+  -- directly, never post to the group or DM another family.
+  is_account_holder boolean not null default false
 );
 
 -- guardianships: lets a second account (e.g. the other parent) access a
@@ -752,6 +764,46 @@ revoke all on function is_on_team(uuid, uuid) from public;
 revoke all on function is_on_team(uuid, uuid) from anon;
 grant execute on function is_on_team(uuid, uuid) to authenticated;
 
+-- is_player_restricted: added 2026-08-24 per Jay's direction — a
+-- self-signed-up 13-17-year-old should be able to reach the coach
+-- directly in Team Chat (ask about drills, say they'll be late) without
+-- opening up the group feed or other families' DMs to them, keeping the
+-- adults-only intent for everything except that one channel. True only
+-- when p_user_id is NOT this team's coach, has at least one player
+-- connection on the roster, AND every one of those player rows is marked
+-- is_account_holder = true (their whole presence on this team is
+-- self-tracked profiles, never a kid they're managing). A guardian
+-- managing even one real kid's profile — including one who also
+-- self-tracks themselves as a player — gets full access, since that's
+-- clearly an adult account.
+create or replace function is_player_restricted(p_team_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    not exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id)
+    and exists (
+      select 1 from team_memberships tm
+      join players p on p.id = tm.player_id
+      where tm.team_id = p_team_id
+        and is_player_owner_or_guardian(p.id, p_user_id)
+    )
+    and not exists (
+      select 1 from team_memberships tm
+      join players p on p.id = tm.player_id
+      where tm.team_id = p_team_id
+        and is_player_owner_or_guardian(p.id, p_user_id)
+        and p.is_account_holder = false
+    );
+$$;
+
+revoke all on function is_player_restricted(uuid, uuid) from public;
+revoke all on function is_player_restricted(uuid, uuid) from anon;
+grant execute on function is_player_restricted(uuid, uuid) to authenticated;
+
 -- list_my_teams: every team a caller can reach — as coach, or as a
 -- guardian of a rostered player. Nothing on My Team surfaces teams you
 -- don't coach today, so this is the entry point the Team Board screen uses
@@ -760,17 +812,18 @@ grant execute on function is_on_team(uuid, uuid) to authenticated;
 -- returned null for guardian rows — teams_coach_access exists specifically
 -- to keep invite codes coach-only, preserved here rather than reopened.
 create or replace function list_my_teams()
-returns table(id uuid, name text, invite_code text, role text)
+returns table(id uuid, name text, invite_code text, role text, restricted boolean)
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select t.id, t.name, t.invite_code, 'coach'::text as role
+  select t.id, t.name, t.invite_code, 'coach'::text as role, false as restricted
   from teams t
   where t.coach_user_id = auth.uid()
   union
-  select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role
+  select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role,
+    is_player_restricted(t.id, auth.uid()) as restricted
   from teams t
   join team_memberships tm on tm.team_id = t.id
   where is_player_owner_or_guardian(tm.player_id, auth.uid())
@@ -786,21 +839,25 @@ grant execute on function list_my_teams() to authenticated;
 -- Prefers the account's own profiles.display_name once set (Account
 -- screen); falls back to a role-based label ("Coach", "Parent of Jayden")
 -- for anyone who hasn't set one — never an email either way, so this list
--- can't double as a way to harvest another family's contact info.
+-- can't double as a way to harvest another family's contact info. `role`
+-- (added same day as is_player_restricted) lets the client reliably find
+-- "the coach" entry by role rather than matching the label string, which
+-- breaks the moment a coach sets their own display_name to something
+-- other than literally "Coach".
 create or replace function list_team_contacts(p_team_id uuid)
-returns table(user_id uuid, label text)
+returns table(user_id uuid, label text, role text)
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select t.coach_user_id, coalesce(pr.display_name, 'Coach')
+  select t.coach_user_id, coalesce(pr.display_name, 'Coach'), 'coach'::text
   from teams t
   left join profiles pr on pr.user_id = t.coach_user_id
   where t.id = p_team_id
     and is_on_team(p_team_id, auth.uid())
   union
-  select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', '))
+  select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
   from team_memberships tm
   join players p on p.id = tm.player_id
   join guardianships g on g.player_id = p.id
@@ -810,7 +867,7 @@ as $$
     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
   group by g.guardian_user_id
   union
-  select p.created_by_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', '))
+  select p.created_by_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
   from team_memberships tm
   join players p on p.id = tm.player_id
   left join profiles pr on pr.user_id = p.created_by_user_id
@@ -862,13 +919,22 @@ create policy team_messages_select on team_messages
   );
 
 -- Can only post as yourself, on a team you're actually on — and for a DM,
--- only to someone else who's also actually on that same team.
+-- only to someone else who's also actually on that same team. Added
+-- 2026-08-24: a restricted account (is_player_restricted — a self-signed-
+-- up teen whose whole roster presence is self-tracked profiles) can only
+-- ever insert a DM to that team's coach — never a team-wide post, never a
+-- DM to another family. Keeps the group feed and cross-family DMs
+-- adults-only while still letting a player reach their coach directly.
 create policy team_messages_insert on team_messages
   for insert
   with check (
     author_user_id = auth.uid()
     and is_on_team(team_messages.team_id, auth.uid())
     and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
+    and (
+      not is_player_restricted(team_messages.team_id, auth.uid())
+      or recipient_user_id = (select coach_user_id from teams where id = team_messages.team_id)
+    )
   );
 
 -- Your own message, or (moderation) any message on a team you coach — same
@@ -1886,3 +1952,105 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
 --   group by p.created_by_user_id;
 -- $$;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, fifth batch):
+-- restricted Team Chat access for a self-signed-up player. No data loss —
+-- is_account_holder defaults to false on every existing player row
+-- (correct for the common case, real parent-managed profiles), new
+-- function, and two function/policy replacements.
+-- ---------------------------------------------------------------------------
+-- alter table players add column is_account_holder boolean not null default false;
+--
+-- create or replace function is_player_restricted(p_team_id uuid, p_user_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     not exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id)
+--     and exists (
+--       select 1 from team_memberships tm
+--       join players p on p.id = tm.player_id
+--       where tm.team_id = p_team_id
+--         and is_player_owner_or_guardian(p.id, p_user_id)
+--     )
+--     and not exists (
+--       select 1 from team_memberships tm
+--       join players p on p.id = tm.player_id
+--       where tm.team_id = p_team_id
+--         and is_player_owner_or_guardian(p.id, p_user_id)
+--         and p.is_account_holder = false
+--     );
+-- $$;
+--
+-- revoke all on function is_player_restricted(uuid, uuid) from public;
+-- revoke all on function is_player_restricted(uuid, uuid) from anon;
+-- grant execute on function is_player_restricted(uuid, uuid) to authenticated;
+--
+-- create or replace function list_my_teams()
+-- returns table(id uuid, name text, invite_code text, role text, restricted boolean)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.id, t.name, t.invite_code, 'coach'::text as role, false as restricted
+--   from teams t
+--   where t.coach_user_id = auth.uid()
+--   union
+--   select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role,
+--     is_player_restricted(t.id, auth.uid()) as restricted
+--   from teams t
+--   join team_memberships tm on tm.team_id = t.id
+--   where is_player_owner_or_guardian(tm.player_id, auth.uid())
+--     and t.coach_user_id <> auth.uid();
+-- $$;
+--
+-- create or replace function list_team_contacts(p_team_id uuid)
+-- returns table(user_id uuid, label text, role text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.coach_user_id, coalesce(pr.display_name, 'Coach'), 'coach'::text
+--   from teams t
+--   left join profiles pr on pr.user_id = t.coach_user_id
+--   where t.id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--   union
+--   select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   join guardianships g on g.player_id = p.id
+--   left join profiles pr on pr.user_id = g.guardian_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by g.guardian_user_id
+--   union
+--   select p.created_by_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   left join profiles pr on pr.user_id = p.created_by_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by p.created_by_user_id;
+-- $$;
+--
+-- drop policy if exists team_messages_insert on team_messages;
+-- create policy team_messages_insert on team_messages
+--   for insert
+--   with check (
+--     author_user_id = auth.uid()
+--     and is_on_team(team_messages.team_id, auth.uid())
+--     and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
+--     and (
+--       not is_player_restricted(team_messages.team_id, auth.uid())
+--       or recipient_user_id = (select coach_user_id from teams where id = team_messages.team_id)
+--     )
+--   );

@@ -15,27 +15,40 @@ export type MyTeam = {
   name: string;
   inviteCode: string | null; // null for a guardian-role row — coach-only, matches teams RLS
   role: TeamRole;
+  // True for a self-signed-up player (is_player_restricted in schema.sql)
+  // — can read the team-wide feed, but can only ever message the coach
+  // directly, never post to the group or DM another family.
+  restricted: boolean;
 };
 
 export async function listMyTeams(): Promise<MyTeam[]> {
   const { data, error } = await supabase.rpc('list_my_teams');
   if (error) throw error;
-  return (data ?? []).map((row: { id: string; name: string; invite_code: string | null; role: TeamRole }) => ({
+  return (
+    data ?? []
+  ).map((row: { id: string; name: string; invite_code: string | null; role: TeamRole; restricted: boolean }) => ({
     id: row.id,
     name: row.name,
     inviteCode: row.invite_code,
     role: row.role,
+    restricted: row.restricted,
   }));
 }
 
-export type TeamContact = { userId: string; label: string };
+export type TeamContact = { userId: string; label: string; role: TeamRole };
 
 // Role-based labels only ("Coach", "Parent of Jayden") — never an email —
 // so a DM picker can't be used to harvest another family's contact info.
+// `role` lets a caller reliably find "the coach" entry without matching
+// the label string, which breaks once a coach sets their own display_name.
 export async function listTeamContacts(teamId: string): Promise<TeamContact[]> {
   const { data, error } = await supabase.rpc('list_team_contacts', { p_team_id: teamId });
   if (error) throw error;
-  return (data ?? []).map((row: { user_id: string; label: string }) => ({ userId: row.user_id, label: row.label }));
+  return (data ?? []).map((row: { user_id: string; label: string; role: TeamRole }) => ({
+    userId: row.user_id,
+    label: row.label,
+    role: row.role,
+  }));
 }
 
 export type TeamMessage = {

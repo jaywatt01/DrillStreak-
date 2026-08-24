@@ -152,12 +152,20 @@ export default function TeamBoardScreen() {
         getUpcomingTeamEvents(activeTeamId),
       ]);
       setMessages(msgs);
-      setContacts(teamContacts.filter((c) => c.userId !== myUserId));
+      // A restricted account (self-signed-up player) only ever gets the
+      // coach as a DM option — RLS would reject a DM to anyone else
+      // anyway (team_messages_insert), so there's no point offering it.
+      const isRestricted = teams.find((t) => t.id === activeTeamId)?.restricted ?? false;
+      setContacts(
+        isRestricted
+          ? teamContacts.filter((c) => c.role === 'coach')
+          : teamContacts.filter((c) => c.userId !== myUserId)
+      );
       setEvents(upcoming);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load team data.');
     }
-  }, [activeTeamId, myUserId]);
+  }, [activeTeamId, myUserId, teams]);
 
   useEffect(() => {
     loadTeamData();
@@ -183,6 +191,13 @@ export default function TeamBoardScreen() {
   };
 
   const isCoach = activeTeam?.role === 'coach';
+  const isRestricted = activeTeam?.restricted ?? false;
+  const coachContact = contacts.find((c) => c.role === 'coach');
+  // A restricted account can compose only while viewing the coach thread
+  // — the team-wide feed and any other DM stay read-only for them (RLS
+  // would reject the insert anyway; this just avoids letting them type
+  // into a composer that's about to fail).
+  const canCompose = !isRestricted || (coachContact != null && thread === coachContact.userId);
 
   const threadMessages = useMemo(() => {
     return messages.filter((m) => {
@@ -457,23 +472,31 @@ export default function TeamBoardScreen() {
             </View>
           ) : null}
 
-          <View style={styles.composerRow}>
-            <TextInput
-              style={styles.composerInput}
-              placeholder={thread === null ? 'Message the team…' : 'Message privately…'}
-              placeholderTextColor={colors.textMuted}
-              value={composerText}
-              onChangeText={setComposerText}
-              multiline
-            />
-            <Pressable
-              style={[styles.sendButton, (!composerText.trim() || sending) && styles.buttonDisabled]}
-              onPress={handleSend}
-              disabled={!composerText.trim() || sending}
-            >
-              {sending ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.sendButtonText}>Send</Text>}
-            </Pressable>
-          </View>
+          {canCompose ? (
+            <View style={styles.composerRow}>
+              <TextInput
+                style={styles.composerInput}
+                placeholder={thread === null ? 'Message the team…' : 'Message privately…'}
+                placeholderTextColor={colors.textMuted}
+                value={composerText}
+                onChangeText={setComposerText}
+                multiline
+              />
+              <Pressable
+                style={[styles.sendButton, (!composerText.trim() || sending) && styles.buttonDisabled]}
+                onPress={handleSend}
+                disabled={!composerText.trim() || sending}
+              >
+                {sending ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.sendButtonText}>Send</Text>}
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.composerRow}>
+              <Text style={styles.restrictedNotice}>
+                You can view team announcements here. To send a message, switch to Coach above.
+              </Text>
+            </View>
+          )}
         </KeyboardAvoidingView>
       ) : (
         <ScrollView
@@ -671,6 +694,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     maxHeight: 100,
   },
+  restrictedNotice: { fontSize: 13, color: colors.textMuted, textAlign: 'center', flex: 1 },
   sendButton: {
     backgroundColor: colors.primary,
     borderRadius: 10,
