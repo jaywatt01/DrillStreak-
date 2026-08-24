@@ -13,6 +13,13 @@ export type RosterPlayer = {
   id: string;
   display_name: string;
   membershipId: string;
+  // The account connected to this player row — a self-signed-up player's
+  // own account, or the parent/guardian who created the profile for them.
+  // Used for the "Message" quick-DM shortcut on the roster row (jumps
+  // straight into that thread in Team Chat) — doesn't attempt to resolve
+  // a second guardian if one exists via guardianships, just the primary
+  // creator.
+  contactUserId: string;
 };
 
 export type AssignedDrill = Drill & {
@@ -70,14 +77,22 @@ export async function setPromptForResults(teamId: string, value: boolean): Promi
 export async function getRoster(teamId: string): Promise<RosterPlayer[]> {
   const { data, error } = await supabase
     .from('team_memberships')
-    .select('id, players(id, display_name)')
+    .select('id, players(id, display_name, created_by_user_id)')
     .eq('team_id', teamId);
   if (error) throw error;
 
   return (data ?? [])
     .flatMap((row) => {
       const player = Array.isArray(row.players) ? row.players[0] : row.players;
-      return player ? [{ ...player, membershipId: row.id as string }] : [];
+      if (!player) return [];
+      return [
+        {
+          id: player.id as string,
+          display_name: player.display_name as string,
+          membershipId: row.id as string,
+          contactUserId: player.created_by_user_id as string,
+        },
+      ];
     })
     .filter((p): p is RosterPlayer => p != null);
 }

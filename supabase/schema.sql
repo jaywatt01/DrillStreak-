@@ -939,6 +939,32 @@ create policy team_messages_select on team_messages
     and (recipient_user_id is null or auth.uid() in (author_user_id, recipient_user_id))
   );
 
+-- is_team_coach: security-definer, same reason as is_on_team/
+-- is_player_restricted above. Real bug caught live (2026-08-24): the
+-- first version of team_messages_insert below compared recipient_user_id
+-- against a bare `select coach_user_id from teams where id = ...`
+-- subquery — but that subquery runs as the CALLING user, and
+-- teams_coach_access restricts SELECT on teams to the owning coach only.
+-- For a restricted player (never the coach), that subquery silently
+-- returned zero rows -> NULL -> the whole comparison failed -> every DM
+-- to the coach was rejected. Exactly why a coach could message a
+-- restricted player but the player could never message back — the coach
+-- branch never even evaluates this subquery (not is_player_restricted is
+-- already true for a coach), so the bug was invisible from that side.
+create or replace function is_team_coach(p_team_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id);
+$$;
+
+revoke all on function is_team_coach(uuid, uuid) from public;
+revoke all on function is_team_coach(uuid, uuid) from anon;
+grant execute on function is_team_coach(uuid, uuid) to authenticated;
+
 -- Can only post as yourself, on a team you're actually on — and for a DM,
 -- only to someone else who's also actually on that same team. Added
 -- 2026-08-24: a restricted account (is_player_restricted — a self-signed-
@@ -954,7 +980,7 @@ create policy team_messages_insert on team_messages
     and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
     and (
       not is_player_restricted(team_messages.team_id, auth.uid())
-      or recipient_user_id = (select coach_user_id from teams where id = team_messages.team_id)
+      or is_team_coach(team_messages.team_id, recipient_user_id)
     )
   );
 
@@ -2268,3 +2294,42 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function list_team_contacts(uuid) from public;
 -- revoke all on function list_team_contacts(uuid) from anon;
 -- grant execute on function list_team_contacts(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, eighth batch):
+-- real bug fix — a restricted player could never actually DM the coach.
+-- team_messages_insert compared recipient_user_id against a bare
+-- `select coach_user_id from teams where id = ...` subquery, which runs as
+-- the CALLING user and is silently filtered to nothing by
+-- teams_coach_access (SELECT on teams is coach-only) for any non-coach
+-- caller — so the comparison always failed for exactly the account it was
+-- meant to allow. Fixed with a security-definer is_team_coach() helper
+-- that bypasses that restriction correctly. No data loss — new function
+-- plus a policy replacement.
+-- ---------------------------------------------------------------------------
+-- create or replace function is_team_coach(p_team_id uuid, p_user_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id);
+-- $$;
+--
+-- revoke all on function is_team_coach(uuid, uuid) from public;
+-- revoke all on function is_team_coach(uuid, uuid) from anon;
+-- grant execute on function is_team_coach(uuid, uuid) to authenticated;
+--
+-- drop policy if exists team_messages_insert on team_messages;
+-- create policy team_messages_insert on team_messages
+--   for insert
+--   with check (
+--     author_user_id = auth.uid()
+--     and is_on_team(team_messages.team_id, auth.uid())
+--     and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
+--     and (
+--       not is_player_restricted(team_messages.team_id, auth.uid())
+--       or is_team_coach(team_messages.team_id, recipient_user_id)
+--     )
+--   );

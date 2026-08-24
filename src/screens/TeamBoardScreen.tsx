@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
 import {
   ActivityIndicator,
@@ -67,6 +67,19 @@ function formatEventWhen(event: TeamEvent): string {
   return `${dateLabel} · ${timeLabel}`;
 }
 
+// `e instanceof Error` alone isn't reliable here for a thrown Supabase
+// error in a React Native/Hermes build — real gap caught 2026-08-24: a
+// genuine RLS rejection came back as the generic fallback text instead of
+// Postgres's actual message, making it much harder to diagnose from a
+// screenshot alone. Duck-types on `.message` instead, which works
+// regardless of whether the prototype chain survived transpilation.
+function errorMessage(e: unknown, fallback: string): string {
+  if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
+    return (e as { message: string }).message;
+  }
+  return fallback;
+}
+
 export default function TeamBoardScreen() {
   // Set when this screen was opened by tapping a push notification
   // (App.tsx's navigateFromNotification) — lands on the actual
@@ -122,7 +135,7 @@ export default function TeamBoardScreen() {
       await syncDeletedTeamEventsFromCalendar();
       setAddedToCalendarIds(await getLocallyAddedEventIds());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load teams.');
+      setError(errorMessage(e, 'Failed to load teams.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -163,7 +176,7 @@ export default function TeamBoardScreen() {
       );
       setEvents(upcoming);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load team data.');
+      setError(errorMessage(e, 'Failed to load team data.'));
     }
   }, [activeTeamId, myUserId, teams]);
 
@@ -198,6 +211,27 @@ export default function TeamBoardScreen() {
   // would reject the insert anyway; this just avoids letting them type
   // into a composer that's about to fail).
   const canCompose = !isRestricted || (coachContact != null && thread === coachContact.userId);
+
+  // Lands a restricted player straight on the one thread they can actually
+  // use, instead of the read-only Team feed — the quick-DM shortcut Jay
+  // asked for on the player's side. Only applies once per team selection
+  // (tracked via the ref) so it doesn't fight a deliberate tap back to
+  // "Team" to read announcements, and never fires for a notification deep
+  // link that already picked a specific thread (notificationParams.teamId
+  // check).
+  const autoDefaultedTeamId = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      isRestricted &&
+      coachContact &&
+      thread === null &&
+      !notificationParams?.teamId &&
+      autoDefaultedTeamId.current !== activeTeamId
+    ) {
+      autoDefaultedTeamId.current = activeTeamId;
+      setThread(coachContact.userId);
+    }
+  }, [isRestricted, coachContact, activeTeamId, notificationParams?.teamId]);
 
   const threadMessages = useMemo(() => {
     return messages.filter((m) => {
@@ -236,7 +270,7 @@ export default function TeamBoardScreen() {
       setComposerText('');
       setReplyingTo(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to send message.');
+      setError(errorMessage(e, 'Failed to send message.'));
     } finally {
       setSending(false);
     }
@@ -252,7 +286,7 @@ export default function TeamBoardScreen() {
             await setTeamMessagePinned(message.id, !message.pinned);
             setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, pinned: !m.pinned } : m)));
           } catch (e) {
-            setError(e instanceof Error ? e.message : 'Failed to update pin.');
+            setError(errorMessage(e, 'Failed to update pin.'));
           }
         },
       });
@@ -269,7 +303,7 @@ export default function TeamBoardScreen() {
             await deleteTeamMessage(message.id);
             setMessages((current) => current.filter((m) => m.id !== message.id));
           } catch (e) {
-            setError(e instanceof Error ? e.message : 'Failed to delete message.');
+            setError(errorMessage(e, 'Failed to delete message.'));
           }
         },
       });
@@ -306,7 +340,7 @@ export default function TeamBoardScreen() {
       setNewEventLocation('');
       setNewEventNotes('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create event.');
+      setError(errorMessage(e, 'Failed to create event.'));
     } finally {
       setSavingEvent(false);
     }
@@ -323,7 +357,7 @@ export default function TeamBoardScreen() {
             await deleteTeamEvent(event.id);
             setEvents((current) => current.filter((e) => e.id !== event.id));
           } catch (e) {
-            setError(e instanceof Error ? e.message : 'Failed to delete event.');
+            setError(errorMessage(e, 'Failed to delete event.'));
           }
         },
       },
@@ -336,7 +370,7 @@ export default function TeamBoardScreen() {
       setAddedToCalendarIds((current) => new Set(current).add(event.id));
       Alert.alert('Added', `${event.title} was added to your calendar.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to add to calendar.');
+      setError(errorMessage(e, 'Failed to add to calendar.'));
     }
   };
 

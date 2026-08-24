@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Alert,
@@ -67,6 +68,7 @@ function formatScheduleLabel(scheduledTime: string | null, durationMinutes: numb
 }
 
 export default function MyTeamScreen() {
+  const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [team, setTeam] = useState<Team | null>(null);
@@ -196,15 +198,22 @@ export default function MyTeamScreen() {
     }
   };
 
-  // Uses the native share sheet rather than a clipboard package — a
-  // clipboard package would be a new native module, which needs a fresh
-  // dev-client/EAS build before it works at all (same class of problem as
-  // the TestFlight/dev-client bundle-ID issue). Share is already part of
-  // React Native core, so this works with today's build, and the iOS share
-  // sheet already includes a "Copy" action plus direct-to-Messages/Mail —
-  // covers "copy it" and "send it out" in one action.
   const handleShareInviteCode = (code: string) => {
     Share.share({ message: `Join my DrillStreak team with invite code: ${code}` });
+  };
+
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  // Real gap Jay caught: the share sheet's own "Copy" action copies
+  // Share.share's whole `message` string (the full sentence), since
+  // Share only ever carries one payload used for every destination —
+  // there's no way to give the sheet's Copy action different content
+  // than Messages/Mail get. A dedicated button using expo-clipboard is
+  // the only way to copy just the code.
+  const handleCopyInviteCode = async (code: string) => {
+    await Clipboard.setStringAsync(code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
   };
 
   const handleTogglePromptForResults = async (value: boolean) => {
@@ -407,18 +416,22 @@ export default function MyTeamScreen() {
 
           <View style={styles.inviteCard}>
             <Text style={styles.inviteLabel}>Invite code · free for coaches, always</Text>
-            <Pressable
-              style={styles.inviteCodeRow}
-              onPress={() => handleShareInviteCode(team.invite_code)}
-              onLongPress={() => handleShareInviteCode(team.invite_code)}
-            >
+            <View style={styles.inviteCodeRow}>
               <Text style={styles.inviteCode}>{team.invite_code}</Text>
-              <Text style={styles.inviteShareIcon}>📤</Text>
-            </Pressable>
+              <View style={styles.inviteActionRow}>
+                <Pressable style={styles.inviteActionButton} onPress={() => handleCopyInviteCode(team.invite_code)}>
+                  <Text style={styles.inviteShareIcon}>{copiedCode ? '✓' : '📋'}</Text>
+                </Pressable>
+                <Pressable style={styles.inviteActionButton} onPress={() => handleShareInviteCode(team.invite_code)}>
+                  <Text style={styles.inviteShareIcon}>📤</Text>
+                </Pressable>
+              </View>
+            </View>
             <Text style={styles.invitePlaceholder}>
-              Share this with every player and parent on your roster — the
-              more of them who join, the more accountability data you see on
-              your own roster activity feed below, at no cost to you.
+              Tap 📋 to copy just the code, or 📤 to share the full invite message. Share this
+              with every player and parent on your roster — the more of them who join, the more
+              accountability data you see on your own roster activity feed below, at no cost to
+              you.
             </Text>
           </View>
 
@@ -461,6 +474,18 @@ export default function MyTeamScreen() {
                     <Text style={styles.statsLink}>Stats</Text>
                     <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
                       <Text style={styles.noteLink}>Note</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
+                          teamId: team.id,
+                          threadUserId: p.contactUserId,
+                          view: 'messages',
+                        })
+                      }
+                      hitSlop={8}
+                    >
+                      <Text style={styles.messageLink}>Message</Text>
                     </Pressable>
                   </View>
                 </Pressable>
@@ -683,13 +708,15 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   inviteLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
-  inviteCodeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  inviteCodeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   inviteCode: {
     color: colors.accent,
     fontSize: 28,
     fontWeight: '700',
     letterSpacing: 2,
   },
+  inviteActionRow: { flexDirection: 'row', gap: 14 },
+  inviteActionButton: { padding: 4 },
   inviteShareIcon: { fontSize: 20 },
   invitePlaceholder: { color: '#FFFFFF', fontSize: 12, opacity: 0.85, marginTop: 4 },
   settingRow: {
@@ -741,6 +768,7 @@ const styles = StyleSheet.create({
   rosterLinks: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   statsLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   noteLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  messageLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   drillRow: {
     borderWidth: 1,
     borderColor: colors.border,
