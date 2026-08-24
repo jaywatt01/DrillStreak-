@@ -990,6 +990,55 @@ create policy team_media_delete on storage.objects
   );
 
 -- ---------------------------------------------------------------------------
+-- notify_team_board_webhook: fires the notify-team-message Edge Function
+-- directly via pg_net, added 2026-08-24 after discovering the live
+-- Supabase dashboard's "Database Triggers" wizard only supports targeting
+-- a Postgres function (its "Choose a function to trigger" picker is
+-- filtered to functions that `returns trigger` — no Edge Function option
+-- was actually present, despite the docs suggesting otherwise). This
+-- sidesteps that wizard entirely: one generic trigger function, reused for
+-- both team_messages and team_events, reading TG_TABLE_NAME so the Edge
+-- Function can branch on it exactly the same way it already does for a
+-- Database Webhook-style payload ({type, table, record}).
+--
+-- The Authorization header carries the publishable/anon key (same
+-- client-safe key already embedded in the app's own .env — not a secret)
+-- purely to pass Supabase's platform-level "is this a valid caller" gate;
+-- it's unrelated to what the Edge Function itself does internally (that
+-- side already uses its own service-role key, auto-injected by Supabase).
+-- ---------------------------------------------------------------------------
+create extension if not exists pg_net with schema extensions;
+
+create or replace function notify_team_board_webhook()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  perform net.http_post(
+    url := 'https://jiohhwahvzajvidbiqnm.supabase.co/functions/v1/notify-team-message',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_69dScqBVzWVq_SLUJQUKNA_cEhBJfnk'
+    ),
+    body := jsonb_build_object('type', 'INSERT', 'table', TG_TABLE_NAME, 'record', row_to_json(NEW))
+  );
+  return NEW;
+end;
+$$;
+
+create trigger notify_team_messages_insert
+  after insert on team_messages
+  for each row
+  execute function notify_team_board_webhook();
+
+create trigger notify_team_events_insert
+  after insert on team_events
+  for each row
+  execute function notify_team_board_webhook();
+
+-- ---------------------------------------------------------------------------
 -- profiles + record_age_attestation: the signup-time age self-attestation
 -- gate (added 2026-08-24, built ahead of Brandon's COPPA-specific legal
 -- review at Jay's explicit direction — see DRILLSTREAK.md's "Age gate"
@@ -1715,3 +1764,43 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function record_age_attestation(uuid, boolean) from public;
 -- grant execute on function record_age_attestation(uuid, boolean) to anon;
 -- grant execute on function record_age_attestation(uuid, boolean) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, third batch):
+-- notify_team_board_webhook — fires the notify-team-message Edge Function
+-- via pg_net directly from a Postgres trigger, bypassing the dashboard's
+-- Triggers wizard (its function picker only supports Postgres functions,
+-- not Edge Functions directly). Requires team_messages/team_events to
+-- already exist (first batch above). No data loss — new extension/
+-- function/triggers only.
+-- ---------------------------------------------------------------------------
+-- create extension if not exists pg_net with schema extensions;
+--
+-- create or replace function notify_team_board_webhook()
+-- returns trigger
+-- language plpgsql
+-- security definer
+-- set search_path = public, extensions
+-- as $$
+-- begin
+--   perform net.http_post(
+--     url := 'https://jiohhwahvzajvidbiqnm.supabase.co/functions/v1/notify-team-message',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer sb_publishable_69dScqBVzWVq_SLUJQUKNA_cEhBJfnk'
+--     ),
+--     body := jsonb_build_object('type', 'INSERT', 'table', TG_TABLE_NAME, 'record', row_to_json(NEW))
+--   );
+--   return NEW;
+-- end;
+-- $$;
+--
+-- create trigger notify_team_messages_insert
+--   after insert on team_messages
+--   for each row
+--   execute function notify_team_board_webhook();
+--
+-- create trigger notify_team_events_insert
+--   after insert on team_events
+--   for each row
+--   execute function notify_team_board_webhook();
