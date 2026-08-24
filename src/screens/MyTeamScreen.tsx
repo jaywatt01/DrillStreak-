@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { colors } from '../theme/colors';
+import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
 import {
   assignDrillToTeam,
@@ -88,6 +89,7 @@ export default function MyTeamScreen() {
   const [noteText, setNoteText] = useState('');
   const [loadingNote, setLoadingNote] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  const [statsPlayer, setStatsPlayer] = useState<RosterPlayer | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -444,18 +446,23 @@ export default function MyTeamScreen() {
           ) : (
             <>
               <Text style={styles.placeholder}>
-                Tap a player to add or edit your note about them. Long-press to remove them
-                from the roster.
+                Tap Stats to see a player's streak, shooting, and history. Tap Note to add or
+                edit your note about them. Long-press to remove them from the roster.
               </Text>
               {roster.map((p) => (
                 <Pressable
                   key={p.id}
                   style={styles.rosterRow}
-                  onPress={() => openNoteEditor(p)}
+                  onPress={() => setStatsPlayer(p)}
                   onLongPress={() => handleLongPressRosterPlayer(p)}
                 >
                   <Text style={styles.rosterName}>{p.display_name}</Text>
-                  <Text style={styles.noteLink}>Note</Text>
+                  <View style={styles.rosterLinks}>
+                    <Text style={styles.statsLink}>Stats</Text>
+                    <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
+                      <Text style={styles.noteLink}>Note</Text>
+                    </Pressable>
+                  </View>
                 </Pressable>
               ))}
             </>
@@ -621,6 +628,14 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+
+      {statsPlayer ? (
+        <CoachPlayerStatsModal
+          playerId={statsPlayer.id}
+          playerName={statsPlayer.display_name}
+          onClose={() => setStatsPlayer(null)}
+        />
+      ) : null}
     </ScrollView>
   );
 }
@@ -723,6 +738,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   rosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  rosterLinks: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  statsLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   noteLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   drillRow: {
     borderWidth: 1,

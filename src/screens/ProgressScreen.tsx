@@ -7,102 +7,21 @@ import StreakCalendar from '../components/StreakCalendar';
 import {
   calculateStreak,
   CompletionHistoryEntry,
+  computeMakesAttemptsTotal,
+  computeRepTallies,
+  computeShootingBreakdown,
   formatPlayerBio,
   getCompletionHistory,
   getPlayerNotes,
+  isFreeThrowDrill,
   listMyPlayers,
   Player,
   PlayerNote,
+  RepTally,
+  ShootingBreakdownEntry,
+  ShootingComposite,
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
-
-type ShootingComposite = { makes: number; attempts: number };
-
-// Free throws are a distinct, recognized stat on their own (FT%), separate
-// from field-shooting drills like spot-up or form shooting — split out by
-// name match rather than a structured drill-type field, since drills don't
-// have one (category is free text). Substring match so a custom drill
-// named e.g. "FT line reps" or "Free Throw Practice" still counts.
-function isFreeThrowDrill(drillName: string): boolean {
-  return drillName.toLowerCase().includes('free throw');
-}
-
-// Sums every logged completion that has BOTH makes and attempts set — that
-// pair is what marks an entry as shooting-type data (a rep-only drill like
-// suicides or jump rope logs attempts alone, with makes left null, so it's
-// excluded here — it gets its own tally instead, via computeRepTallies
-// below, since there's no "make" for a sprint or a jump-rope rep and a
-// percentage wouldn't mean anything for it). `matches` further splits
-// shooting drills into two buckets (free throws vs. everything else) so
-// the two composites below don't double-count the same completion.
-// Computed from whatever history the viewer is currently allowed to see
-// (visibleHistory, already tier-gated), not the unrestricted full history
-// — same paywall boundary as everything else on this screen, not a back
-// door around it. Returns null (render nothing) if that bucket has no
-// data yet.
-function computeMakesAttemptsTotal(
-  history: CompletionHistoryEntry[],
-  matches: (drillName: string) => boolean
-): ShootingComposite | null {
-  let makes = 0;
-  let attempts = 0;
-  for (const entry of history) {
-    for (const drill of entry.drills) {
-      if (drill.makes != null && drill.attempts != null && matches(drill.name)) {
-        makes += drill.makes;
-        attempts += drill.attempts;
-      }
-    }
-  }
-  return attempts > 0 ? { makes, attempts } : null;
-}
-
-type ShootingBreakdownEntry = { date: string; drillName: string; makes: number; attempts: number };
-
-// The per-entry counterpart to computeMakesAttemptsTotal — same matching
-// logic, but returns the individual contributing rows instead of a sum, so
-// tapping a Free Throws/Shooting card can show exactly which days and
-// drills made up that total. `history` is already ordered most-recent-day
-// first (see getCompletionHistory), so no re-sort needed here.
-function computeShootingBreakdown(
-  history: CompletionHistoryEntry[],
-  matches: (drillName: string) => boolean
-): ShootingBreakdownEntry[] {
-  const entries: ShootingBreakdownEntry[] = [];
-  for (const entry of history) {
-    for (const drill of entry.drills) {
-      if (drill.makes != null && drill.attempts != null && matches(drill.name)) {
-        entries.push({ date: entry.date, drillName: drill.name, makes: drill.makes, attempts: drill.attempts });
-      }
-    }
-  }
-  return entries;
-}
-
-type RepTally = { drillName: string; totalAttempts: number };
-
-// The counterpart to computeShootingComposite above: totals attempts for
-// every drill logged WITHOUT a makes value — jump rope reps, suicides,
-// sprints, anything that's a rep count rather than a makes/attempts pair.
-// Grouped and summed per drill name, most-logged drill first. A drill
-// with a mix of makes/attempts entries AND attempts-only entries (unusual,
-// but not prevented at the data layer) only contributes its attempts-only
-// entries here — the makes/attempts ones are already counted in the
-// shooting composite, and double-counting either way would overstate one
-// of the two numbers.
-function computeRepTallies(history: CompletionHistoryEntry[]): RepTally[] {
-  const totals = new Map<string, number>();
-  for (const entry of history) {
-    for (const drill of entry.drills) {
-      if (drill.attempts != null && drill.makes == null) {
-        totals.set(drill.name, (totals.get(drill.name) ?? 0) + drill.attempts);
-      }
-    }
-  }
-  return Array.from(totals.entries())
-    .map(([drillName, totalAttempts]) => ({ drillName, totalAttempts }))
-    .sort((a, b) => b.totalAttempts - a.totalAttempts);
-}
 
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
