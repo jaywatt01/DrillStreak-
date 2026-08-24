@@ -844,6 +844,18 @@ grant execute on function list_my_teams() to authenticated;
 -- "the coach" entry by role rather than matching the label string, which
 -- breaks the moment a coach sets their own display_name to something
 -- other than literally "Coach".
+--
+-- The created_by_user_id branch's fallback label (no profiles.display_name
+-- set) special-cases is_account_holder: a self-signed-up player whose
+-- ENTIRE created-players group is is_account_holder = true gets labeled
+-- with just their own player name(s), not "Parent of {their own name}" —
+-- real cosmetic bug caught the same day this shipped, since the original
+-- version always used the "Parent of" framing regardless of who the
+-- player row actually represents. An account that both self-tracks AND
+-- manages a real kid still gets "Parent of {kid's name}" — the `filter`
+-- clause below excludes any self-tracked row's own name from that list,
+-- so it's never phrased as "Parent of {their own name}" even in that
+-- mixed case.
 create or replace function list_team_contacts(p_team_id uuid)
 returns table(user_id uuid, label text, role text)
 language sql
@@ -867,7 +879,16 @@ as $$
     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
   group by g.guardian_user_id
   union
-  select p.created_by_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
+  select
+    p.created_by_user_id,
+    coalesce(
+      max(pr.display_name),
+      case
+        when bool_and(p.is_account_holder) then string_agg(distinct p.display_name, ', ')
+        else 'Parent of ' || string_agg(distinct p.display_name, ', ') filter (where not p.is_account_holder)
+      end
+    ),
+    'guardian'::text
   from team_memberships tm
   join players p on p.id = tm.player_id
   left join profiles pr on pr.user_id = p.created_by_user_id
@@ -2054,3 +2075,50 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       or recipient_user_id = (select coach_user_id from teams where id = team_messages.team_id)
 --     )
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, sixth batch):
+-- fix list_team_contacts labeling a self-signed-up player as "Parent of
+-- {their own name}". No data loss — function replacement only.
+-- ---------------------------------------------------------------------------
+-- create or replace function list_team_contacts(p_team_id uuid)
+-- returns table(user_id uuid, label text, role text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.coach_user_id, coalesce(pr.display_name, 'Coach'), 'coach'::text
+--   from teams t
+--   left join profiles pr on pr.user_id = t.coach_user_id
+--   where t.id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--   union
+--   select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   join guardianships g on g.player_id = p.id
+--   left join profiles pr on pr.user_id = g.guardian_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by g.guardian_user_id
+--   union
+--   select
+--     p.created_by_user_id,
+--     coalesce(
+--       max(pr.display_name),
+--       case
+--         when bool_and(p.is_account_holder) then string_agg(distinct p.display_name, ', ')
+--         else 'Parent of ' || string_agg(distinct p.display_name, ', ') filter (where not p.is_account_holder)
+--       end
+--     ),
+--     'guardian'::text
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   left join profiles pr on pr.user_id = p.created_by_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by p.created_by_user_id;
+-- $$;
