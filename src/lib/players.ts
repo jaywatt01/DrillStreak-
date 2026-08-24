@@ -162,14 +162,19 @@ export async function listMyPlayers(): Promise<Player[]> {
   return (data ?? []) as Player[];
 }
 
-export async function addPlayer(displayName: string): Promise<Player> {
+// isAccountHolder: true when this player row IS the signed-in account
+// (an adult self-tracker, or a 13-17-year-old who signed up for
+// themselves) — false when it's a kid this account is managing. Drives
+// the Team Chat restriction in schema.sql's is_player_restricted(); see
+// the comment on players.is_account_holder for the full reasoning.
+export async function addPlayer(displayName: string, isAccountHolder: boolean): Promise<Player> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
 
   const { data, error } = await supabase
     .from('players')
-    .insert({ display_name: displayName, created_by_user_id: userId })
+    .insert({ display_name: displayName, created_by_user_id: userId, is_account_holder: isAccountHolder })
     .select(PLAYER_SELECT_COLUMNS)
     .single();
   if (error) throw error;

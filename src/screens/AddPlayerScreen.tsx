@@ -37,6 +37,11 @@ export default function AddPlayerScreen() {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
   const [newPlayerName, setNewPlayerName] = useState('');
+  // Defaults to false (someone else, e.g. a parent adding their kid) —
+  // the more common real case for this app. Drives whether this account
+  // gets the Team Chat coach-DM-only restriction (schema.sql's
+  // is_player_restricted) once this player joins a team.
+  const [newPlayerIsMe, setNewPlayerIsMe] = useState(false);
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
 
@@ -127,8 +132,9 @@ export default function AddPlayerScreen() {
     setAddingPlayer(true);
     setPlayerError(null);
     try {
-      const player = await addPlayer(newPlayerName.trim());
+      const player = await addPlayer(newPlayerName.trim(), newPlayerIsMe);
       setNewPlayerName('');
+      setNewPlayerIsMe(false);
       await load();
       setSelectedPlayerId(player.id);
     } catch (e) {
@@ -424,6 +430,21 @@ export default function AddPlayerScreen() {
         value={newPlayerName}
         onChangeText={setNewPlayerName}
       />
+      <Text style={styles.whoLabel}>Is this you, or someone else (e.g. your child)?</Text>
+      <View style={styles.whoRow}>
+        <Pressable
+          style={[styles.whoChip, !newPlayerIsMe && styles.whoChipActive]}
+          onPress={() => setNewPlayerIsMe(false)}
+        >
+          <Text style={[styles.whoChipText, !newPlayerIsMe && styles.whoChipTextActive]}>Someone else</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.whoChip, newPlayerIsMe && styles.whoChipActive]}
+          onPress={() => setNewPlayerIsMe(true)}
+        >
+          <Text style={[styles.whoChipText, newPlayerIsMe && styles.whoChipTextActive]}>This is me</Text>
+        </Pressable>
+      </View>
       <Pressable
         style={[styles.button, (!newPlayerName.trim() || addingPlayer) && styles.buttonDisabled]}
         onPress={handleAddPlayer}
@@ -607,6 +628,20 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: 14, color: colors.text, fontWeight: '600' },
   chipTextSelected: { color: '#FFFFFF' },
+  whoLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 2 },
+  whoRow: { flexDirection: 'row', gap: 8 },
+  whoChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  whoChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  whoChipText: { fontSize: 14, fontWeight: '600', color: colors.text },
+  whoChipTextActive: { color: '#FFFFFF' },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
