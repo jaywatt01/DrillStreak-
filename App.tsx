@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
@@ -27,6 +28,48 @@ const TAB_ICONS: Record<string, string> = {
   'Team Chat': '💬',
   Account: '⚙️',
 };
+
+// Lets the notification-tap handler below navigate imperatively — it fires
+// outside the Tab.Navigator's own render tree, so it can't use the normal
+// useNavigation() hook.
+const navigationRef = createNavigationContainerRef();
+
+// Real gap Jay flagged: tapping a push notification just reopened the app
+// to whatever screen was last showing, not the actual conversation. Both
+// the trigger (built ahead of time here) and the live listener are needed
+// — getLastNotificationResponseAsync covers the app being fully killed and
+// launched BY the tap (the listener alone misses that case, since it only
+// fires for taps while the JS runtime is already alive).
+//
+// Real race, fixed before shipping rather than after: on a cold start the
+// notification check can resolve BEFORE NavigationContainer ever mounts
+// (it doesn't render at all until the auth session finishes restoring from
+// AsyncStorage, which is its own separate async read) — the most common
+// real case, not an edge case, since a killed-and-relaunched app is
+// usually already signed in. Queue the response instead of dropping it
+// silently, and flush the queue once the container's onReady fires.
+let pendingNotificationResponse: Notifications.NotificationResponse | null = null;
+
+function navigateToNotificationTarget(response: Notifications.NotificationResponse) {
+  const data = response.notification.request.content.data as
+    | { teamId?: string; threadUserId?: string; view?: string }
+    | undefined;
+  // Untyped navigation, same `as never` escape hatch already used
+  // elsewhere in this app (HomeScreen/ProgressScreen/AddPlayerScreen) —
+  // there's no typed navigator param list anywhere in this codebase.
+  (navigationRef.navigate as (name: never, params?: object) => void)(
+    'Team Chat' as never,
+    data?.teamId ? { teamId: data.teamId, threadUserId: data.threadUserId, view: data.view } : undefined
+  );
+}
+
+function navigateFromNotification(response: Notifications.NotificationResponse) {
+  if (navigationRef.isReady()) {
+    navigateToNotificationTarget(response);
+  } else {
+    pendingNotificationResponse = response;
+  }
+}
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -69,6 +112,19 @@ export default function App() {
     return () => subscription.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    // App already running (foreground or backgrounded) when the
+    // notification is tapped.
+    const subscription = Notifications.addNotificationResponseReceivedListener(navigateFromNotification);
+    // App was fully killed and the tap is what launched it — the listener
+    // above never fires for this case, since JS wasn't running yet when
+    // the tap happened.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) navigateFromNotification(response);
+    });
+    return () => subscription.remove();
+  }, []);
+
   if (loading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -87,7 +143,15 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        if (pendingNotificationResponse) {
+          navigateToNotificationTarget(pendingNotificationResponse);
+          pendingNotificationResponse = null;
+        }
+      }}
+    >
       <StatusBar style="dark" />
       <Tab.Navigator
         screenOptions={({ route }) => ({

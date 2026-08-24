@@ -3,6 +3,7 @@
     "name": "DrillStreak",
     "slug": "drillstreak",
     "version": "1.0.0",
+    "scheme": "drillstreak",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

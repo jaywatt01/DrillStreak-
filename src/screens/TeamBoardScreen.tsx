@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Alert,
@@ -68,6 +68,15 @@ function formatEventWhen(event: TeamEvent): string {
 }
 
 export default function TeamBoardScreen() {
+  // Set when this screen was opened by tapping a push notification
+  // (App.tsx's navigateFromNotification) — lands on the actual
+  // team/conversation the notification was about, instead of whatever
+  // team/thread happened to be selected before.
+  const route = useRoute();
+  const notificationParams = route.params as
+    | { teamId?: string; threadUserId?: string; view?: BoardView }
+    | undefined;
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +128,14 @@ export default function TeamBoardScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (notificationParams?.teamId) {
+      setActiveTeamId(notificationParams.teamId);
+      setThread(notificationParams.threadUserId ?? null);
+      setView(notificationParams.view ?? 'messages');
+    }
+  }, [notificationParams?.teamId, notificationParams?.threadUserId, notificationParams?.view]);
 
   useFocusEffect(
     useCallback(() => {
@@ -181,6 +198,15 @@ export default function TeamBoardScreen() {
 
   const topLevelMessages = threadMessages.filter((m) => m.parentMessageId === null);
   const repliesFor = (messageId: string) => threadMessages.filter((m) => m.parentMessageId === messageId);
+
+  // `contacts` deliberately excludes the signed-in user (it's the DM
+  // picker list) — check self first, then fall back to it. A message from
+  // someone since removed from the roster (rare) falls back to a generic
+  // label rather than showing nothing.
+  const authorLabel = (userId: string): string => {
+    if (userId === myUserId) return 'You';
+    return contacts.find((c) => c.userId === userId)?.label ?? 'Team member';
+  };
 
   const handleSend = async () => {
     if (!activeTeamId || !composerText.trim()) return;
@@ -400,6 +426,7 @@ export default function TeamBoardScreen() {
                     style={[styles.messageBubble, m.authorUserId === myUserId && styles.messageBubbleMine]}
                     onLongPress={() => handleLongPressMessage(m)}
                   >
+                    <Text style={styles.messageAuthor}>{authorLabel(m.authorUserId)}</Text>
                     <Text style={styles.messageBody}>{m.body}</Text>
                     <Text style={styles.messageMeta}>{new Date(m.createdAt).toLocaleString()}</Text>
                   </Pressable>
@@ -409,6 +436,7 @@ export default function TeamBoardScreen() {
                       style={[styles.replyBubble, r.authorUserId === myUserId && styles.messageBubbleMine]}
                       onLongPress={() => handleLongPressMessage(r)}
                     >
+                      <Text style={styles.messageAuthor}>{authorLabel(r.authorUserId)}</Text>
                       <Text style={styles.messageBody}>{r.body}</Text>
                       <Text style={styles.messageMeta}>{new Date(r.createdAt).toLocaleString()}</Text>
                     </Pressable>
@@ -608,6 +636,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     maxWidth: '75%',
   },
+  messageAuthor: { fontSize: 12, fontWeight: '700', color: colors.primaryDark, marginBottom: 2 },
   messageBody: { fontSize: 14, color: colors.text, lineHeight: 19 },
   messageMeta: { fontSize: 11, color: colors.textMuted, marginTop: 4 },
   replyingBanner: {

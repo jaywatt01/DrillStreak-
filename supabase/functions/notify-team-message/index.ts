@@ -63,12 +63,15 @@ async function getPushTokens(userIds: string[]): Promise<string[]> {
   return (data ?? []).map((row) => row.expo_push_token as string);
 }
 
-async function sendExpoPush(tokens: string[], title: string, body: string) {
+// `data` rides along on the push and is what App.tsx's notification-tap
+// handler reads to land on the actual conversation/calendar instead of
+// just reopening the app on whatever screen was last showing.
+async function sendExpoPush(tokens: string[], title: string, body: string, data: Record<string, string>) {
   if (tokens.length === 0) return;
   await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(tokens.map((to) => ({ to, title, body, sound: 'default' }))),
+    body: JSON.stringify(tokens.map((to) => ({ to, title, body, sound: 'default', data }))),
   });
 }
 
@@ -79,13 +82,19 @@ Deno.serve(async (req) => {
     const message = payload.record;
     // A pinned-toggle or other UPDATE never reaches here (webhook is
     // INSERT-only), so every call is a genuinely new message.
-    const recipientIds = message.recipient_user_id
+    const isDirectMessage = message.recipient_user_id != null;
+    const recipientIds = isDirectMessage
       ? [message.recipient_user_id as string]
       : (await getTeamUserIds(message.team_id as string)).filter((id) => id !== message.author_user_id);
 
     const tokens = await getPushTokens(recipientIds);
-    const title = message.recipient_user_id ? 'New private message' : 'New team message';
-    await sendExpoPush(tokens, title, (message.body as string).slice(0, 120));
+    const title = isDirectMessage ? 'New private message' : 'New team message';
+    // For a DM, the recipient opening this needs the thread with whoever
+    // SENT it (the author) — not with themselves, which is what
+    // recipient_user_id actually holds from the sender's side of the row.
+    const data: Record<string, string> = { teamId: message.team_id as string, view: 'messages' };
+    if (isDirectMessage) data.threadUserId = message.author_user_id as string;
+    await sendExpoPush(tokens, title, (message.body as string).slice(0, 120), data);
   }
 
   if (payload.table === 'team_events') {
@@ -94,7 +103,10 @@ Deno.serve(async (req) => {
       (id) => id !== event.created_by_user_id
     );
     const tokens = await getPushTokens(recipientIds);
-    await sendExpoPush(tokens, 'New team event', event.title as string);
+    await sendExpoPush(tokens, 'New team event', event.title as string, {
+      teamId: event.team_id as string,
+      view: 'calendar',
+    });
   }
 
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });

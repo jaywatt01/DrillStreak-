@@ -27,6 +27,7 @@ export default function AuthScreen() {
   const [ageGateStep, setAgeGateStep] = useState<AgeGateStep>('ask');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signUpMessage, setSignUpMessage] = useState<string | null>(null);
@@ -53,6 +54,13 @@ export default function AuthScreen() {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: email.trim(),
           password,
+          // Without this, Supabase falls back to the dashboard-level Auth
+          // "Site URL" — which is where the confirmation link was landing
+          // people on the support page instead of back in the app. Also
+          // requires this exact URL added to Authentication -> URL
+          // Configuration -> Redirect URLs in the Supabase dashboard, or
+          // Supabase silently ignores it and falls back the same way.
+          options: { emailRedirectTo: 'drillstreak://confirmed' },
         });
         if (signUpError) throw signUpError;
         // Fire-and-forget: this is a compliance record, not something the
@@ -135,16 +143,21 @@ export default function AuthScreen() {
               value={email}
               onChangeText={setEmail}
             />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-              autoCapitalize="none"
-              autoComplete="password"
-              value={password}
-              onChangeText={setPassword}
-            />
+            <View style={styles.passwordRow}>
+              <TextInput
+                style={[styles.input, styles.passwordInput]}
+                placeholder="Password"
+                placeholderTextColor={colors.textMuted}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoComplete="password"
+                value={password}
+                onChangeText={setPassword}
+              />
+              <Pressable style={styles.showPasswordButton} onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
+                <Text style={styles.showPasswordText}>{showPassword ? 'Hide' : 'Show'}</Text>
+              </Pressable>
+            </View>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {signUpMessage ? <Text style={styles.info}>{signUpMessage}</Text> : null}
@@ -199,6 +212,10 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.surface,
   },
+  passwordRow: { position: 'relative', justifyContent: 'center' },
+  passwordInput: { paddingRight: 60 },
+  showPasswordButton: { position: 'absolute', right: 14 },
+  showPasswordText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
   error: { color: '#C4362B', fontSize: 13 },
   info: { color: colors.primaryDark, fontSize: 13 },
   button: {

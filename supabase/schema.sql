@@ -781,11 +781,12 @@ revoke all on function list_my_teams() from public;
 revoke all on function list_my_teams() from anon;
 grant execute on function list_my_teams() to authenticated;
 
--- list_team_contacts: the "who can I DM" list for a team — the coach, plus
--- one row per distinct guardian, labeled by which rostered player(s) they
--- guard on this team. Deliberately returns a role-based label, never an
--- email — DMs are addressed by user_id, this is just enough for a parent
--- to recognize who they're messaging, not a cross-family contact list.
+-- list_team_contacts: the "who can I DM" list for a team, and (as of
+-- 2026-08-24) also what Team Chat renders as each message's sender label.
+-- Prefers the account's own profiles.display_name once set (Account
+-- screen); falls back to a role-based label ("Coach", "Parent of Jayden")
+-- for anyone who hasn't set one — never an email either way, so this list
+-- can't double as a way to harvest another family's contact info.
 create or replace function list_team_contacts(p_team_id uuid)
 returns table(user_id uuid, label text)
 language sql
@@ -793,23 +794,26 @@ stable
 security definer
 set search_path = public
 as $$
-  select t.coach_user_id, 'Coach'::text
+  select t.coach_user_id, coalesce(pr.display_name, 'Coach')
   from teams t
+  left join profiles pr on pr.user_id = t.coach_user_id
   where t.id = p_team_id
     and is_on_team(p_team_id, auth.uid())
   union
-  select g.guardian_user_id, 'Parent of ' || string_agg(distinct p.display_name, ', ')
+  select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', '))
   from team_memberships tm
   join players p on p.id = tm.player_id
   join guardianships g on g.player_id = p.id
+  left join profiles pr on pr.user_id = g.guardian_user_id
   where tm.team_id = p_team_id
     and is_on_team(p_team_id, auth.uid())
     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
   group by g.guardian_user_id
   union
-  select p.created_by_user_id, 'Parent of ' || string_agg(distinct p.display_name, ', ')
+  select p.created_by_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', '))
   from team_memberships tm
   join players p on p.id = tm.player_id
+  left join profiles pr on pr.user_id = p.created_by_user_id
   where tm.team_id = p_team_id
     and is_on_team(p_team_id, auth.uid())
     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
@@ -1059,8 +1063,19 @@ create trigger notify_team_events_insert
 -- ---------------------------------------------------------------------------
 create table profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  age_attested_13_or_over boolean not null,
-  age_attested_at timestamptz not null default now()
+  -- Nullable (2026-08-24 addition, see below) — an account created before
+  -- this table existed can now set a display_name via a direct upsert with
+  -- no attestation on file, and that's an accurate reflection of reality
+  -- (we genuinely have no attestation for a pre-existing account), not
+  -- something to paper over with a fabricated true/false value.
+  age_attested_13_or_over boolean,
+  age_attested_at timestamptz not null default now(),
+  -- Added 2026-08-24: what Team Chat actually displays for this account,
+  -- instead of a generic role label ("Parent of Jayden") once a roster
+  -- has 20-30 families on it and generic labels stop being enough to
+  -- recognize who's who. Set by the user themselves in Account — see
+  -- list_team_contacts below for how it's preferred once set.
+  display_name text
 );
 
 alter table profiles enable row level security;
@@ -1072,6 +1087,19 @@ create policy profiles_owner_read on profiles
 create policy profiles_owner_delete on profiles
   for delete
   using (user_id = auth.uid());
+
+-- Lets a signed-in user set/update their own display_name directly (via
+-- upsert), independent of the age-attestation RPC path above — covers
+-- both a brand-new profiles row (account predates this table) and editing
+-- an existing one.
+create policy profiles_owner_insert on profiles
+  for insert
+  with check (user_id = auth.uid());
+
+create policy profiles_owner_update on profiles
+  for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
 create or replace function record_age_attestation(p_user_id uuid, p_attested_13_or_over boolean)
 returns void
@@ -1804,3 +1832,57 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --   after insert on team_events
 --   for each row
 --   execute function notify_team_board_webhook();
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, fourth batch):
+-- profiles.display_name — lets an account set a real name for Team Chat
+-- instead of a generic role label, plus the RLS to let a user set it
+-- themselves, plus widening list_team_contacts() to prefer it. No data
+-- loss — age_attested_13_or_over goes from not-null to nullable (existing
+-- rows keep their real values; this only affects future rows), and
+-- display_name is a new nullable column.
+-- ---------------------------------------------------------------------------
+-- alter table profiles alter column age_attested_13_or_over drop not null;
+-- alter table profiles add column display_name text;
+--
+-- create policy profiles_owner_insert on profiles
+--   for insert
+--   with check (user_id = auth.uid());
+--
+-- create policy profiles_owner_update on profiles
+--   for update
+--   using (user_id = auth.uid())
+--   with check (user_id = auth.uid());
+--
+-- create or replace function list_team_contacts(p_team_id uuid)
+-- returns table(user_id uuid, label text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.coach_user_id, coalesce(pr.display_name, 'Coach')
+--   from teams t
+--   left join profiles pr on pr.user_id = t.coach_user_id
+--   where t.id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--   union
+--   select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', '))
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   join guardianships g on g.player_id = p.id
+--   left join profiles pr on pr.user_id = g.guardian_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by g.guardian_user_id
+--   union
+--   select p.created_by_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', '))
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   left join profiles pr on pr.user_id = p.created_by_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by p.created_by_user_id;
+-- $$;

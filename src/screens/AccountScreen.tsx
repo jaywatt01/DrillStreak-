@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
+import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
 import {
   isPurchasesConfigured,
   purchaseParentTier,
@@ -14,10 +26,28 @@ export default function AccountScreen() {
   const { hasParentTier, loading: entitlementLoading } = useParentEntitlement();
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [loadingName, setLoadingName] = useState(true);
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+    getMyDisplayName()
+      .then((name) => setDisplayName(name ?? ''))
+      .finally(() => setLoadingName(false));
   }, []);
+
+  const handleSaveName = async () => {
+    setSavingName(true);
+    try {
+      await setMyDisplayName(displayName);
+      Alert.alert('Saved', 'Your name will now show on Team Chat instead of a generic label.');
+    } catch (e) {
+      Alert.alert('Could not save name', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const handleUpgrade = async () => {
     setPurchasing(true);
@@ -69,6 +99,34 @@ export default function AccountScreen() {
         Manage your Parent and Coach memberships independently — both can be
         active on the same account at once.
       </Text>
+
+      <View style={styles.nameCard}>
+        <Text style={styles.tierLabel}>Your name</Text>
+        <Text style={styles.tierBody}>
+          Shown on Team Chat instead of a generic label like "Parent of Jayden" — helps a
+          roster of 20-30 families tell who's who.
+        </Text>
+        {loadingName ? (
+          <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
+        ) : (
+          <>
+            <TextInput
+              style={styles.nameInput}
+              placeholder="e.g. Mike Thompson"
+              placeholderTextColor={colors.textMuted}
+              value={displayName}
+              onChangeText={setDisplayName}
+            />
+            <Pressable
+              style={[styles.button, savingName && styles.buttonDisabled]}
+              onPress={handleSaveName}
+              disabled={savingName}
+            >
+              {savingName ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>Save name</Text>}
+            </Pressable>
+          </>
+        )}
+      </View>
 
       <View style={styles.tierCard}>
         <Text style={styles.tierLabel}>Coach</Text>
@@ -170,6 +228,25 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 4,
     backgroundColor: colors.surface,
+  },
+  nameCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+    gap: 4,
+    backgroundColor: colors.surface,
+  },
+  nameInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: colors.background,
+    marginTop: 8,
   },
   tierCardActive: {
     borderColor: colors.accent,
