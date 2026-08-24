@@ -1,6 +1,31 @@
 import * as Calendar from 'expo-calendar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { requestCalendarWriteAccess } from './calendar';
+
+// Local-only map of team_events.id -> this device's expo-calendar event id.
+// Deliberately per-device, never server-stored: an expo-calendar event id
+// only means something on the device that created it, and each person who
+// taps "Add to my calendar" gets their own separate copy on their own
+// phone — there's no single shared "the" calendar-event id for a team
+// event the way there is for the team_events row itself.
+const CALENDAR_MAP_STORAGE_KEY = 'drillstreak:teamEventCalendarMap';
+
+async function readCalendarMap(): Promise<Record<string, string>> {
+  const raw = await AsyncStorage.getItem(CALENDAR_MAP_STORAGE_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function writeCalendarMap(map: Record<string, string>): Promise<void> {
+  await AsyncStorage.setItem(CALENDAR_MAP_STORAGE_KEY, JSON.stringify(map));
+}
+
+// Every team_events.id this device has personally added to its own
+// calendar, regardless of team — used to render "already added" state and
+// as the candidate set for syncDeletedTeamEventsFromCalendar below.
+export async function getLocallyAddedEventIds(): Promise<Set<string>> {
+  return new Set(Object.keys(await readCalendarMap()));
+}
 
 export type TeamEvent = {
   id: string;
@@ -100,8 +125,14 @@ export async function deleteTeamEvent(eventId: string): Promise<void> {
 // (addDrillToCalendar in lib/calendar.ts), not a new integration. There is
 // no server-side push to a player's/parent's personal calendar app; each
 // account taps "Add to my calendar" on their own device, same model as the
-// existing drill-scheduling feature.
+// existing drill-scheduling feature. Stores the resulting local calendar
+// event id so a second tap doesn't create a duplicate, and so
+// syncDeletedTeamEventsFromCalendar below can clean it up if the team
+// event is later deleted.
 export async function addTeamEventToCalendar(event: TeamEvent): Promise<void> {
+  const map = await readCalendarMap();
+  if (map[event.id]) return; // already added on this device — no-op, not an error
+
   const granted = await requestCalendarWriteAccess();
   if (!granted) {
     throw new Error('Calendar permission was not granted.');
@@ -120,11 +151,49 @@ export async function addTeamEventToCalendar(event: TeamEvent): Promise<void> {
   // app afterward same as any manually-added event.
   const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
 
-  await Calendar.createEventAsync(defaultCalendar.id, {
+  const calendarEventId = await Calendar.createEventAsync(defaultCalendar.id, {
     title: event.title,
     startDate,
     endDate,
     location: event.location ?? undefined,
     notes: event.notes ?? undefined,
   });
+
+  map[event.id] = calendarEventId;
+  await writeCalendarMap(map);
+}
+
+// Reconciles this device's own calendar against team_events that have
+// since been deleted server-side. There's no way to push a delete into
+// someone else's phone the instant a coach removes an event — expo-
+// calendar (and iOS/Android calendar APIs generally) only ever touch the
+// calendar of the device the code is running on — so each device that has
+// ever added a team event cleans up its own copy the next time it loads
+// the calendar, not instantly for everyone at once. Only ever looks at
+// ids this device itself added (map keys), so it can't touch or even see
+// any other event on the user's personal calendar.
+export async function syncDeletedTeamEventsFromCalendar(): Promise<void> {
+  const map = await readCalendarMap();
+  const trackedIds = Object.keys(map);
+  if (trackedIds.length === 0) return;
+
+  const { data, error } = await supabase.from('team_events').select('id').in('id', trackedIds);
+  if (error) throw error;
+  const stillExisting = new Set((data ?? []).map((row) => row.id as string));
+
+  let changed = false;
+  for (const id of trackedIds) {
+    if (!stillExisting.has(id)) {
+      try {
+        await Calendar.deleteEventAsync(map[id]);
+      } catch {
+        // Already gone from the device's Calendar app (e.g. the user
+        // deleted it manually themselves) — the end state we wanted
+        // either way, not an error worth surfacing.
+      }
+      delete map[id];
+      changed = true;
+    }
+  }
+  if (changed) await writeCalendarMap(map);
 }

@@ -32,7 +32,9 @@ import {
   addTeamEventToCalendar,
   createTeamEvent,
   deleteTeamEvent,
+  getLocallyAddedEventIds,
   getUpcomingTeamEvents,
+  syncDeletedTeamEventsFromCalendar,
   TeamEvent,
 } from '../lib/teamEvents';
 
@@ -86,6 +88,7 @@ export default function TeamBoardScreen() {
   const [sending, setSending] = useState(false);
 
   const [events, setEvents] = useState<TeamEvent[]>([]);
+  const [addedToCalendarIds, setAddedToCalendarIds] = useState<Set<string>>(new Set());
   const [addingEvent, setAddingEvent] = useState(false);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventType, setNewEventType] = useState('');
@@ -104,6 +107,11 @@ export default function TeamBoardScreen() {
       const myTeams = await listMyTeams();
       setTeams(myTeams);
       setActiveTeamId((current) => current ?? myTeams[0]?.id ?? null);
+
+      // Not team-scoped — reconciles every event this device has ever
+      // added, across every team, against what still exists server-side.
+      await syncDeletedTeamEventsFromCalendar();
+      setAddedToCalendarIds(await getLocallyAddedEventIds());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load teams.');
     } finally {
@@ -284,6 +292,7 @@ export default function TeamBoardScreen() {
   const handleAddToCalendar = async (event: TeamEvent) => {
     try {
       await addTeamEventToCalendar(event);
+      setAddedToCalendarIds((current) => new Set(current).add(event.id));
       Alert.alert('Added', `${event.title} was added to your calendar.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add to calendar.');
@@ -513,9 +522,13 @@ export default function TeamBoardScreen() {
                 {event.location ? <Text style={styles.eventLocation}>📍 {event.location}</Text> : null}
                 {event.notes ? <Text style={styles.eventNotes}>{event.notes}</Text> : null}
                 <View style={styles.eventButtonRow}>
-                  <Pressable style={styles.eventLinkButton} onPress={() => handleAddToCalendar(event)}>
-                    <Text style={styles.eventLink}>Add to my calendar</Text>
-                  </Pressable>
+                  {addedToCalendarIds.has(event.id) ? (
+                    <Text style={styles.eventAddedLabel}>✓ On your calendar</Text>
+                  ) : (
+                    <Pressable style={styles.eventLinkButton} onPress={() => handleAddToCalendar(event)}>
+                      <Text style={styles.eventLink}>Add to my calendar</Text>
+                    </Pressable>
+                  )}
                   {isCoach ? (
                     <Pressable style={styles.eventLinkButton} onPress={() => handleDeleteEvent(event)}>
                       <Text style={styles.eventLinkDestructive}>Remove</Text>
@@ -688,5 +701,6 @@ const styles = StyleSheet.create({
   eventButtonRow: { flexDirection: 'row', gap: 16, marginTop: 6 },
   eventLinkButton: {},
   eventLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  eventAddedLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted },
   eventLinkDestructive: { fontSize: 13, fontWeight: '600', color: '#C4362B' },
 });
