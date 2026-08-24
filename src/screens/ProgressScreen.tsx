@@ -7,6 +7,7 @@ import StreakCalendar from '../components/StreakCalendar';
 import {
   calculateStreak,
   CompletionHistoryEntry,
+  formatPlayerBio,
   getCompletionHistory,
   getPlayerNotes,
   listMyPlayers,
@@ -14,20 +15,6 @@ import {
   PlayerNote,
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
-
-// Joins whichever bio fields are actually set into one line — e.g.
-// "Point Guard · 6'2" · 165 lbs · Class of 2027". Skips anything blank
-// rather than showing an empty placeholder, and returns null (render
-// nothing) if none of the four fields are filled in yet.
-function formatPlayerBio(player: Player): string | null {
-  const parts = [
-    player.position,
-    player.height,
-    player.weight,
-    player.grad_year != null ? `Class of ${player.grad_year}` : null,
-  ].filter((p): p is string => !!p);
-  return parts.length > 0 ? parts.join(' · ') : null;
-}
 
 type ShootingComposite = { makes: number; attempts: number };
 

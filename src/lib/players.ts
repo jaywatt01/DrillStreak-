@@ -18,6 +18,22 @@ export type Player = {
 
 export const PLAYER_SELECT_COLUMNS = 'id, display_name, height, weight, grad_year, position';
 
+// Joins whichever bio fields are actually set into one line — e.g.
+// "Point Guard · 6'2" · 165 lbs · Class of 2027". Skips anything blank
+// rather than showing an empty placeholder, and returns null (render
+// nothing) if none of the four fields are filled in yet. Shared between
+// Progress and Home so both screens read the exact same formatting —
+// moved here from ProgressScreen.tsx rather than duplicated a second time.
+export function formatPlayerBio(player: Player): string | null {
+  const parts = [
+    player.position,
+    player.height,
+    player.weight,
+    player.grad_year != null ? `Class of ${player.grad_year}` : null,
+  ].filter((p): p is string => !!p);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 // Fallback event length for any drill with no set duration (custom or
 // seeded). 30, not 60 — most drills in the seeded library run 5-10 min,
 // and a blanket hour block overstates almost all of them.

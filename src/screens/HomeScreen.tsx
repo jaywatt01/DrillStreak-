@@ -22,6 +22,7 @@ import {
   DEFAULT_DRILL_MINUTES,
   deleteCompletion,
   DrillResult,
+  formatPlayerBio,
   getCompletionDates,
   getTodayCompletions,
   getWeeklyDrills,
@@ -389,6 +390,9 @@ export default function HomeScreen() {
         cards.map(({ player, drills, source, streak, completedToday, promptForResults, challenges }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
+            {formatPlayerBio(player) ? (
+              <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
+            ) : null}
 
             <View style={styles.streakCard}>
               <Text style={styles.streakLabel}>Current streak</Text>
@@ -722,6 +726,7 @@ const styles = StyleSheet.create({
   emptyState: { gap: 12 },
   playerSection: { gap: 10, marginBottom: 8 },
   playerName: { fontSize: 20, fontWeight: '700', color: colors.text },
+  playerBio: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: -4 },
   streakCard: {
     backgroundColor: colors.primary,
     borderRadius: 16,
