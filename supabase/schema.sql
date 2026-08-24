@@ -374,22 +374,61 @@ create policy completions_owner_access on completions
   for all
   using (is_player_owner_or_guardian(completions.player_id, auth.uid()));
 
--- Restricted to the current week (2026-07-26). Coach role is free forever
--- by design, but this policy previously had no date bound at all, so a
--- parent could self-coach their own kid and read that kid's FULL history
--- straight from the API, bypassing the $4.99/mo parent_tier history
--- paywall entirely at the data layer. The app's own My Team screen never
--- asks for more than the current week (getRosterCompletionsThisWeek), so
--- this matches existing product behavior exactly — no legitimate feature
--- relied on a coach reading further back than this.
+-- coach_has_real_roster: true if this coach's roster has at least 3
+-- players who are NOT owned/guarded by the coach themselves — i.e., real
+-- other families, not the coach's own kid(s) or dummy profiles the coach
+-- created to pad a fake roster. Added 2026-08-23, see DRILLSTREAK.md's
+-- "coach-access gap" note for the full reasoning: counting raw player
+-- count would be gameable (a coach can create throwaway player profiles
+-- in one tap), but a dummy profile is still owned by the coach's own
+-- account, so it never counts here — genuinely defeating that shortcut,
+-- not just discouraging it. The threshold (3) is a judgment call, not
+-- derived from data — easy to tune later via one line.
+create or replace function coach_has_real_roster(p_coach_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select count(*) >= 3
+  from team_memberships tm
+  join teams t on t.id = tm.team_id
+  where t.coach_user_id = p_coach_user_id
+    and not is_player_owner_or_guardian(tm.player_id, p_coach_user_id);
+$$;
+
+revoke all on function coach_has_real_roster(uuid) from public;
+revoke all on function coach_has_real_roster(uuid) from anon;
+grant execute on function coach_has_real_roster(uuid) to authenticated;
+
+-- Restricted to the current week by default (2026-07-26). Coach role is
+-- free forever by design, but this policy previously had no date bound at
+-- all, so a parent could self-coach their own kid and read that kid's
+-- FULL history straight from the API, bypassing the $4.99/mo parent_tier
+-- history paywall entirely at the data layer.
+--
+-- Widened 2026-08-23: the original fix above closed the loophole but was
+-- too blunt for a real, common case — a coach who coaches their own kid
+-- alongside a real roster of other kids could see everyone else's full
+-- history for free except their own kid's, which is backwards. Two
+-- additional OR branches: full history for any player the coach does NOT
+-- own/guard (was already the intent, just never had this second
+-- condition to lean on), and full history for EVERY player on the
+-- roster — including the coach's own kid — once coach_has_real_roster
+-- confirms this is a genuine multi-family team, not a fake team-of-one.
 create policy completions_coach_read on completions
   for select
   using (
-    completions.date >= date_trunc('week', current_date)::date
-    and exists (
+    exists (
       select 1 from team_memberships tm
       join teams t on t.id = tm.team_id
       where tm.player_id = completions.player_id and t.coach_user_id = auth.uid()
+    )
+    and (
+      completions.date >= date_trunc('week', current_date)::date
+      or not is_player_owner_or_guardian(completions.player_id, auth.uid())
+      or coach_has_real_roster(auth.uid())
     )
   );
 
@@ -1084,3 +1123,42 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- alter table players add column weight text;
 -- alter table players add column grad_year integer;
 -- alter table players add column position text;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-23): widen coach
+-- history access. No data loss — this only replaces a policy and adds a
+-- new function, no tables or columns touched.
+-- ---------------------------------------------------------------------------
+-- create or replace function coach_has_real_roster(p_coach_user_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select count(*) >= 3
+--   from team_memberships tm
+--   join teams t on t.id = tm.team_id
+--   where t.coach_user_id = p_coach_user_id
+--     and not is_player_owner_or_guardian(tm.player_id, p_coach_user_id);
+-- $$;
+--
+-- revoke all on function coach_has_real_roster(uuid) from public;
+-- revoke all on function coach_has_real_roster(uuid) from anon;
+-- grant execute on function coach_has_real_roster(uuid) to authenticated;
+--
+-- drop policy if exists completions_coach_read on completions;
+-- create policy completions_coach_read on completions
+--   for select
+--   using (
+--     exists (
+--       select 1 from team_memberships tm
+--       join teams t on t.id = tm.team_id
+--       where tm.player_id = completions.player_id and t.coach_user_id = auth.uid()
+--     )
+--     and (
+--       completions.date >= date_trunc('week', current_date)::date
+--       or not is_player_owner_or_guardian(completions.player_id, auth.uid())
+--       or coach_has_real_roster(auth.uid())
+--     )
+--   );

@@ -34,6 +34,93 @@ export function formatPlayerBio(player: Player): string | null {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
+export type ShootingComposite = { makes: number; attempts: number };
+
+// Free throws are a distinct, recognized stat on their own (FT%), separate
+// from field-shooting drills like spot-up or form shooting — split out by
+// name match rather than a structured drill-type field, since drills don't
+// have one (category is free text). Substring match so a custom drill
+// named e.g. "FT line reps" or "Free Throw Practice" still counts.
+export function isFreeThrowDrill(drillName: string): boolean {
+  return drillName.toLowerCase().includes('free throw');
+}
+
+// Sums every logged completion that has BOTH makes and attempts set — that
+// pair is what marks an entry as shooting-type data (a rep-only drill like
+// suicides or jump rope logs attempts alone, with makes left null, so it's
+// excluded here — it gets its own tally instead, via computeRepTallies
+// below, since there's no "make" for a sprint or a jump-rope rep and a
+// percentage wouldn't mean anything for it). `matches` further splits
+// shooting drills into two buckets (free throws vs. everything else) so
+// the two composites don't double-count the same completion. Returns null
+// (render nothing) if that bucket has no data yet. Shared between
+// Progress (player/parent view, tier-gated history) and the coach roster
+// view (RLS-gated history) — both just pass whatever history they're
+// actually allowed to see; this function doesn't know or care which.
+export function computeMakesAttemptsTotal(
+  history: CompletionHistoryEntry[],
+  matches: (drillName: string) => boolean
+): ShootingComposite | null {
+  let makes = 0;
+  let attempts = 0;
+  for (const entry of history) {
+    for (const drill of entry.drills) {
+      if (drill.makes != null && drill.attempts != null && matches(drill.name)) {
+        makes += drill.makes;
+        attempts += drill.attempts;
+      }
+    }
+  }
+  return attempts > 0 ? { makes, attempts } : null;
+}
+
+export type ShootingBreakdownEntry = { date: string; drillName: string; makes: number; attempts: number };
+
+// The per-entry counterpart to computeMakesAttemptsTotal — same matching
+// logic, but returns the individual contributing rows instead of a sum, so
+// tapping a Free Throws/Shooting card can show exactly which days and
+// drills made up that total. `history` is already ordered most-recent-day
+// first (see getCompletionHistory), so no re-sort needed here.
+export function computeShootingBreakdown(
+  history: CompletionHistoryEntry[],
+  matches: (drillName: string) => boolean
+): ShootingBreakdownEntry[] {
+  const entries: ShootingBreakdownEntry[] = [];
+  for (const entry of history) {
+    for (const drill of entry.drills) {
+      if (drill.makes != null && drill.attempts != null && matches(drill.name)) {
+        entries.push({ date: entry.date, drillName: drill.name, makes: drill.makes, attempts: drill.attempts });
+      }
+    }
+  }
+  return entries;
+}
+
+export type RepTally = { drillName: string; totalAttempts: number };
+
+// The counterpart to computeMakesAttemptsTotal above: totals attempts for
+// every drill logged WITHOUT a makes value — jump rope reps, suicides,
+// sprints, anything that's a rep count rather than a makes/attempts pair.
+// Grouped and summed per drill name, most-logged drill first. A drill
+// with a mix of makes/attempts entries AND attempts-only entries (unusual,
+// but not prevented at the data layer) only contributes its attempts-only
+// entries here — the makes/attempts ones are already counted in the
+// shooting composite, and double-counting either way would overstate one
+// of the two numbers.
+export function computeRepTallies(history: CompletionHistoryEntry[]): RepTally[] {
+  const totals = new Map<string, number>();
+  for (const entry of history) {
+    for (const drill of entry.drills) {
+      if (drill.attempts != null && drill.makes == null) {
+        totals.set(drill.name, (totals.get(drill.name) ?? 0) + drill.attempts);
+      }
+    }
+  }
+  return Array.from(totals.entries())
+    .map(([drillName, totalAttempts]) => ({ drillName, totalAttempts }))
+    .sort((a, b) => b.totalAttempts - a.totalAttempts);
+}
+
 // Fallback event length for any drill with no set duration (custom or
 // seeded). 30, not 60 — most drills in the seeded library run 5-10 min,
 // and a blanket hour block overstates almost all of them.
