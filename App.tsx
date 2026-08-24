@@ -7,11 +7,13 @@ import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
 import { clearPurchasesUser, configurePurchases, identifyPurchasesUser } from './src/lib/purchases';
+import { registerForPushNotifications } from './src/lib/pushNotifications';
 import AuthScreen from './src/screens/AuthScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import MyTeamScreen from './src/screens/MyTeamScreen';
 import AddPlayerScreen from './src/screens/AddPlayerScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
+import TeamBoardScreen from './src/screens/TeamBoardScreen';
 import AccountScreen from './src/screens/AccountScreen';
 import { colors } from './src/theme/colors';
 
@@ -22,6 +24,7 @@ const TAB_ICONS: Record<string, string> = {
   'My Team': '👥',
   'Add a Player': '➕',
   Progress: '📈',
+  'Team Chat': '💬',
   Account: '⚙️',
 };
 
@@ -35,13 +38,20 @@ export default function App() {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
-      if (data.session?.user.id) identifyPurchasesUser(data.session.user.id);
+      if (data.session?.user.id) {
+        identifyPurchasesUser(data.session.user.id);
+        // Fire-and-forget: a denied/unavailable permission shouldn't block
+        // app startup, same reasoning as everywhere else permissions are
+        // requested in this app (camera, calendar).
+        registerForPushNotifications().catch(() => {});
+      }
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       if (newSession?.user.id) {
         identifyPurchasesUser(newSession.user.id);
+        registerForPushNotifications().catch(() => {});
       } else if (event === 'SIGNED_OUT') {
         // Real bug, caught July 29, 2026, on the first-ever fresh install
         // this identity code has run against: Supabase also fires
@@ -93,6 +103,7 @@ export default function App() {
         <Tab.Screen name="My Team" component={MyTeamScreen} />
         <Tab.Screen name="Add a Player" component={AddPlayerScreen} />
         <Tab.Screen name="Progress" component={ProgressScreen} />
+        <Tab.Screen name="Team Chat" component={TeamBoardScreen} />
         <Tab.Screen name="Account" component={AccountScreen} />
       </Tab.Navigator>
     </NavigationContainer>
