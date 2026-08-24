@@ -14,6 +14,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
+import { listMyTeams, listTeamContacts } from '../lib/teamMessages';
 import {
   isPurchasesConfigured,
   purchaseParentTier,
@@ -37,11 +38,37 @@ export default function AccountScreen() {
       .finally(() => setLoadingName(false));
   }, []);
 
+  // Soft check, not a hard gate: a display_name is one value per account,
+  // shared across every team that account is on, so a strict app-wide
+  // unique constraint isn't really coherent (two unrelated teams both
+  // having a "Chris" isn't a real conflict). What actually matters is
+  // whether it collides with someone on the SAME roster(s) this account
+  // is actually part of — checked at save time against every team's
+  // contact list, excluding the account's own existing entry.
+  const checkNameCollision = async (trimmedName: string): Promise<boolean> => {
+    const { data: userData } = await supabase.auth.getUser();
+    const myUserId = userData.user?.id;
+    const myTeams = await listMyTeams();
+    const allContacts = (await Promise.all(myTeams.map((t) => listTeamContacts(t.id)))).flat();
+    return allContacts.some(
+      (c) => c.userId !== myUserId && c.label.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+  };
+
   const handleSaveName = async () => {
     setSavingName(true);
     try {
+      const trimmed = displayName.trim();
+      const collision = trimmed ? await checkNameCollision(trimmed) : false;
       await setMyDisplayName(displayName);
-      Alert.alert('Saved', 'Your name will now show on Team Chat instead of a generic label.');
+      if (collision) {
+        Alert.alert(
+          'Name already in use',
+          `Someone else on your team is already going by "${trimmed}" — consider adding a last initial or a name your team already knows you by, so people can tell you apart. Saved anyway.`
+        );
+      } else {
+        Alert.alert('Saved', 'Your name will now show on Team Chat instead of a generic label.');
+      }
     } catch (e) {
       Alert.alert('Could not save name', e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
