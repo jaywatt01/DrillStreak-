@@ -990,6 +990,56 @@ create policy team_media_delete on storage.objects
   );
 
 -- ---------------------------------------------------------------------------
+-- profiles + record_age_attestation: the signup-time age self-attestation
+-- gate (added 2026-08-24, built ahead of Brandon's COPPA-specific legal
+-- review at Jay's explicit direction — see DRILLSTREAK.md's "Age gate"
+-- section. AuthScreen.tsx now asks "are you 13 or older?" before showing
+-- the sign-up form at all; this table is the audit record of that answer,
+-- not an access-control gate — nothing elsewhere in the app reads this
+-- column to decide what an account can do.
+--
+-- Written via a security-definer RPC, not a normal RLS-gated insert,
+-- because this project requires email confirmation before a session
+-- exists — supabase.auth.signUp() returns a real user id immediately, but
+-- no active session to satisfy a normal `user_id = auth.uid()` check.
+-- record_age_attestation() is deliberately granted to `anon` as well as
+-- `authenticated` — the only function in this schema with that grant.
+-- Low-risk despite the pre-session exposure: the table carries no
+-- authorization weight, and `on conflict do nothing` means a given
+-- user_id's attestation can only ever be written once, never overwritten.
+-- ---------------------------------------------------------------------------
+create table profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  age_attested_13_or_over boolean not null,
+  age_attested_at timestamptz not null default now()
+);
+
+alter table profiles enable row level security;
+
+create policy profiles_owner_read on profiles
+  for select
+  using (user_id = auth.uid());
+
+create policy profiles_owner_delete on profiles
+  for delete
+  using (user_id = auth.uid());
+
+create or replace function record_age_attestation(p_user_id uuid, p_attested_13_or_over boolean)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into profiles (user_id, age_attested_13_or_over)
+  values (p_user_id, p_attested_13_or_over)
+  on conflict (user_id) do nothing;
+$$;
+
+revoke all on function record_age_attestation(uuid, boolean) from public;
+grant execute on function record_age_attestation(uuid, boolean) to anon;
+grant execute on function record_age_attestation(uuid, boolean) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Seed: default drill library (10 drills, 3 categories)
 -- estimated_minutes is only backfilled for the 4 drills that already state
 -- a time in their name — the other 6 are rep-based with no stated time, so
@@ -1629,3 +1679,39 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
 --     )
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, second batch):
+-- the signup age self-attestation gate (profiles + record_age_attestation).
+-- No data loss — new table/function only.
+-- ---------------------------------------------------------------------------
+-- create table profiles (
+--   user_id uuid primary key references auth.users(id) on delete cascade,
+--   age_attested_13_or_over boolean not null,
+--   age_attested_at timestamptz not null default now()
+-- );
+--
+-- alter table profiles enable row level security;
+--
+-- create policy profiles_owner_read on profiles
+--   for select
+--   using (user_id = auth.uid());
+--
+-- create policy profiles_owner_delete on profiles
+--   for delete
+--   using (user_id = auth.uid());
+--
+-- create or replace function record_age_attestation(p_user_id uuid, p_attested_13_or_over boolean)
+-- returns void
+-- language sql
+-- security definer
+-- set search_path = public
+-- as $$
+--   insert into profiles (user_id, age_attested_13_or_over)
+--   values (p_user_id, p_attested_13_or_over)
+--   on conflict (user_id) do nothing;
+-- $$;
+--
+-- revoke all on function record_age_attestation(uuid, boolean) from public;
+-- grant execute on function record_age_attestation(uuid, boolean) to anon;
+-- grant execute on function record_age_attestation(uuid, boolean) to authenticated;
