@@ -725,6 +725,271 @@ revoke all on function get_player_challenges(uuid) from anon;
 grant execute on function get_player_challenges(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- is_on_team: security-definer helper for the Team Board build below (added
+-- 2026-08-24). Same reason as is_player_owner_or_guardian/player_has_prompt_
+-- for_results above — teams_coach_access restricts SELECT on `teams` to the
+-- owning coach, so an inline check against an arbitrary p_user_id (not just
+-- auth.uid()) would silently fail under RLS. True if p_user_id coaches
+-- p_team_id, OR owns/guards a player rostered on it.
+-- ---------------------------------------------------------------------------
+create or replace function is_on_team(p_team_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id)
+    or exists (
+      select 1 from team_memberships tm
+      where tm.team_id = p_team_id
+        and is_player_owner_or_guardian(tm.player_id, p_user_id)
+    );
+$$;
+
+revoke all on function is_on_team(uuid, uuid) from public;
+revoke all on function is_on_team(uuid, uuid) from anon;
+grant execute on function is_on_team(uuid, uuid) to authenticated;
+
+-- list_my_teams: every team a caller can reach — as coach, or as a
+-- guardian of a rostered player. Nothing on My Team surfaces teams you
+-- don't coach today, so this is the entry point the Team Board screen uses
+-- to find teams a parent-only account is actually part of. security
+-- definer for the same reason as is_on_team; invite_code is deliberately
+-- returned null for guardian rows — teams_coach_access exists specifically
+-- to keep invite codes coach-only, preserved here rather than reopened.
+create or replace function list_my_teams()
+returns table(id uuid, name text, invite_code text, role text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.id, t.name, t.invite_code, 'coach'::text as role
+  from teams t
+  where t.coach_user_id = auth.uid()
+  union
+  select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role
+  from teams t
+  join team_memberships tm on tm.team_id = t.id
+  where is_player_owner_or_guardian(tm.player_id, auth.uid())
+    and t.coach_user_id <> auth.uid();
+$$;
+
+revoke all on function list_my_teams() from public;
+revoke all on function list_my_teams() from anon;
+grant execute on function list_my_teams() to authenticated;
+
+-- list_team_contacts: the "who can I DM" list for a team — the coach, plus
+-- one row per distinct guardian, labeled by which rostered player(s) they
+-- guard on this team. Deliberately returns a role-based label, never an
+-- email — DMs are addressed by user_id, this is just enough for a parent
+-- to recognize who they're messaging, not a cross-family contact list.
+create or replace function list_team_contacts(p_team_id uuid)
+returns table(user_id uuid, label text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.coach_user_id, 'Coach'::text
+  from teams t
+  where t.id = p_team_id
+    and is_on_team(p_team_id, auth.uid())
+  union
+  select g.guardian_user_id, 'Parent of ' || string_agg(distinct p.display_name, ', ')
+  from team_memberships tm
+  join players p on p.id = tm.player_id
+  join guardianships g on g.player_id = p.id
+  where tm.team_id = p_team_id
+    and is_on_team(p_team_id, auth.uid())
+    and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
+  group by g.guardian_user_id
+  union
+  select p.created_by_user_id, 'Parent of ' || string_agg(distinct p.display_name, ', ')
+  from team_memberships tm
+  join players p on p.id = tm.player_id
+  where tm.team_id = p_team_id
+    and is_on_team(p_team_id, auth.uid())
+    and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
+  group by p.created_by_user_id;
+$$;
+
+revoke all on function list_team_contacts(uuid) from public;
+revoke all on function list_team_contacts(uuid) from anon;
+grant execute on function list_team_contacts(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- team_messages: the Team Board — team-wide posts AND private 1:1s in one
+-- table (recipient_user_id null = team-wide, set = a DM between author and
+-- that one recipient), with optional threading (parent_message_id). Added
+-- 2026-08-24 per Rylee's request, scoped with Jay first (see
+-- DRILLSTREAK.md's "Team Board" section for the full negotiation). Adults-
+-- only by design — matches how the rest of this app already treats a
+-- player as a parent-managed profile, not an independent poster.
+-- media_url exists now so nothing needs rebuilding later, but the app's
+-- upload UI stays switched off (TEAM_MEDIA_ENABLED = false in
+-- src/lib/teamMedia.ts) until the media-release gate in DRILLSTREAK.md is
+-- flipped on — this column and the storage bucket/RLS at the bottom of
+-- this migration are inert until the client actually calls them.
+-- ---------------------------------------------------------------------------
+create table team_messages (
+  id uuid primary key default gen_random_uuid(),
+  team_id uuid not null references teams(id) on delete cascade,
+  author_user_id uuid not null references auth.users(id),
+  recipient_user_id uuid references auth.users(id),
+  parent_message_id uuid references team_messages(id) on delete cascade,
+  body text not null,
+  media_url text,
+  pinned boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table team_messages enable row level security;
+
+-- Team-wide messages (recipient_user_id null) are visible to anyone on the
+-- team; a DM is visible only to the two people in it.
+create policy team_messages_select on team_messages
+  for select
+  using (
+    is_on_team(team_messages.team_id, auth.uid())
+    and (recipient_user_id is null or auth.uid() in (author_user_id, recipient_user_id))
+  );
+
+-- Can only post as yourself, on a team you're actually on — and for a DM,
+-- only to someone else who's also actually on that same team.
+create policy team_messages_insert on team_messages
+  for insert
+  with check (
+    author_user_id = auth.uid()
+    and is_on_team(team_messages.team_id, auth.uid())
+    and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
+  );
+
+-- Your own message, or (moderation) any message on a team you coach — same
+-- trust model already used for player_notes/roster removal elsewhere here.
+create policy team_messages_delete on team_messages
+  for delete
+  using (
+    author_user_id = auth.uid()
+    or exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid())
+  );
+
+-- Pin/unpin only, coach only — an announcement pin is a coach moderation
+-- action, not something any parent can set on their own post.
+create policy team_messages_update on team_messages
+  for update
+  using (exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid()))
+  with check (exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid()));
+
+alter publication supabase_realtime add table team_messages;
+
+-- ---------------------------------------------------------------------------
+-- team_events: the shared team calendar (games, practices, meals).
+-- Coach-authored, team-visible — same "coach assigns, roster consumes"
+-- pattern already used for drill assignments, kept deliberately separate
+-- from the open two-way team_messages board above so the schedule stays
+-- authoritative. event_type is free text, not an enum, same reasoning as
+-- drills.category/players.position elsewhere in this schema.
+-- ---------------------------------------------------------------------------
+create table team_events (
+  id uuid primary key default gen_random_uuid(),
+  team_id uuid not null references teams(id) on delete cascade,
+  title text not null,
+  event_type text,
+  event_date date not null,
+  event_time time,
+  location text,
+  notes text,
+  created_by_user_id uuid not null references auth.users(id),
+  created_at timestamptz not null default now()
+);
+
+alter table team_events enable row level security;
+
+create policy team_events_select on team_events
+  for select
+  using (is_on_team(team_events.team_id, auth.uid()));
+
+create policy team_events_coach_insert on team_events
+  for insert
+  with check (exists (select 1 from teams t where t.id = team_events.team_id and t.coach_user_id = auth.uid()));
+
+create policy team_events_coach_update on team_events
+  for update
+  using (exists (select 1 from teams t where t.id = team_events.team_id and t.coach_user_id = auth.uid()));
+
+create policy team_events_coach_delete on team_events
+  for delete
+  using (exists (select 1 from teams t where t.id = team_events.team_id and t.coach_user_id = auth.uid()));
+
+alter publication supabase_realtime add table team_events;
+
+-- ---------------------------------------------------------------------------
+-- push_tokens: one row per device/token, registered client-side once a user
+-- grants notification permission. Fanout (which tokens get notified about
+-- which new team_messages/team_events row) happens in the
+-- notify-team-message Edge Function, not in SQL — see
+-- supabase/functions/notify-team-message/index.ts. Requires an Apple Push
+-- key in your Apple Developer account before it actually delivers on iOS —
+-- see DRILLSTREAK.md for the manual steps this table alone doesn't cover.
+-- ---------------------------------------------------------------------------
+create table push_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  expo_push_token text not null,
+  updated_at timestamptz not null default now(),
+  unique (user_id, expo_push_token)
+);
+
+alter table push_tokens enable row level security;
+
+create policy push_tokens_owner on push_tokens
+  for all
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- team-media storage bucket: exists now so nothing needs rebuilding later,
+-- but stays inert until TEAM_MEDIA_ENABLED (src/lib/teamMedia.ts) is
+-- switched on — see the media-release gate note above and in
+-- DRILLSTREAK.md. Path convention: {team_id}/{message_id}/{filename} — RLS
+-- reads team_id straight out of the path via storage.foldername(), the
+-- same per-tenant scoping pattern Supabase's own docs use. Simplification:
+-- delete is coach-only, not per-author — deleting your own message removes
+-- it from the app, but not the underlying file; acceptable for v1, not a
+-- security gap since read access stays fully RLS-gated either way.
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('team-media', 'team-media', false)
+on conflict (id) do nothing;
+
+create policy team_media_select on storage.objects
+  for select
+  using (
+    bucket_id = 'team-media'
+    and is_on_team((storage.foldername(name))[1]::uuid, auth.uid())
+  );
+
+create policy team_media_insert on storage.objects
+  for insert
+  with check (
+    bucket_id = 'team-media'
+    and is_on_team((storage.foldername(name))[1]::uuid, auth.uid())
+  );
+
+create policy team_media_delete on storage.objects
+  for delete
+  using (
+    bucket_id = 'team-media'
+    and exists (
+      select 1 from teams t
+      where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+    )
+  );
+
+-- ---------------------------------------------------------------------------
 -- Seed: default drill library (10 drills, 3 categories)
 -- estimated_minutes is only backfilled for the 4 drills that already state
 -- a time in their name — the other 6 are rep-based with no stated time, so
@@ -1160,5 +1425,207 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       completions.date >= date_trunc('week', current_date)::date
 --       or not is_player_owner_or_guardian(completions.player_id, auth.uid())
 --       or coach_has_real_roster(auth.uid())
+--     )
+--   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24): Team Board —
+-- messages (team-wide + DMs + threading), team calendar, push-token
+-- registration table, and the team-media storage bucket. No data loss —
+-- all new tables/functions/policies, nothing existing altered. Run this
+-- whole block in one paste in the Supabase SQL editor.
+-- ---------------------------------------------------------------------------
+-- create or replace function is_on_team(p_team_id uuid, p_user_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id)
+--     or exists (
+--       select 1 from team_memberships tm
+--       where tm.team_id = p_team_id
+--         and is_player_owner_or_guardian(tm.player_id, p_user_id)
+--     );
+-- $$;
+--
+-- revoke all on function is_on_team(uuid, uuid) from public;
+-- revoke all on function is_on_team(uuid, uuid) from anon;
+-- grant execute on function is_on_team(uuid, uuid) to authenticated;
+--
+-- create or replace function list_my_teams()
+-- returns table(id uuid, name text, invite_code text, role text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.id, t.name, t.invite_code, 'coach'::text as role
+--   from teams t
+--   where t.coach_user_id = auth.uid()
+--   union
+--   select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role
+--   from teams t
+--   join team_memberships tm on tm.team_id = t.id
+--   where is_player_owner_or_guardian(tm.player_id, auth.uid())
+--     and t.coach_user_id <> auth.uid();
+-- $$;
+--
+-- revoke all on function list_my_teams() from public;
+-- revoke all on function list_my_teams() from anon;
+-- grant execute on function list_my_teams() to authenticated;
+--
+-- create or replace function list_team_contacts(p_team_id uuid)
+-- returns table(user_id uuid, label text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.coach_user_id, 'Coach'::text
+--   from teams t
+--   where t.id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--   union
+--   select g.guardian_user_id, 'Parent of ' || string_agg(distinct p.display_name, ', ')
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   join guardianships g on g.player_id = p.id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by g.guardian_user_id
+--   union
+--   select p.created_by_user_id, 'Parent of ' || string_agg(distinct p.display_name, ', ')
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by p.created_by_user_id;
+-- $$;
+--
+-- revoke all on function list_team_contacts(uuid) from public;
+-- revoke all on function list_team_contacts(uuid) from anon;
+-- grant execute on function list_team_contacts(uuid) to authenticated;
+--
+-- create table team_messages (
+--   id uuid primary key default gen_random_uuid(),
+--   team_id uuid not null references teams(id) on delete cascade,
+--   author_user_id uuid not null references auth.users(id),
+--   recipient_user_id uuid references auth.users(id),
+--   parent_message_id uuid references team_messages(id) on delete cascade,
+--   body text not null,
+--   media_url text,
+--   pinned boolean not null default false,
+--   created_at timestamptz not null default now()
+-- );
+--
+-- alter table team_messages enable row level security;
+--
+-- create policy team_messages_select on team_messages
+--   for select
+--   using (
+--     is_on_team(team_messages.team_id, auth.uid())
+--     and (recipient_user_id is null or auth.uid() in (author_user_id, recipient_user_id))
+--   );
+--
+-- create policy team_messages_insert on team_messages
+--   for insert
+--   with check (
+--     author_user_id = auth.uid()
+--     and is_on_team(team_messages.team_id, auth.uid())
+--     and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
+--   );
+--
+-- create policy team_messages_delete on team_messages
+--   for delete
+--   using (
+--     author_user_id = auth.uid()
+--     or exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid())
+--   );
+--
+-- create policy team_messages_update on team_messages
+--   for update
+--   using (exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid()))
+--   with check (exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid()));
+--
+-- alter publication supabase_realtime add table team_messages;
+--
+-- create table team_events (
+--   id uuid primary key default gen_random_uuid(),
+--   team_id uuid not null references teams(id) on delete cascade,
+--   title text not null,
+--   event_type text,
+--   event_date date not null,
+--   event_time time,
+--   location text,
+--   notes text,
+--   created_by_user_id uuid not null references auth.users(id),
+--   created_at timestamptz not null default now()
+-- );
+--
+-- alter table team_events enable row level security;
+--
+-- create policy team_events_select on team_events
+--   for select
+--   using (is_on_team(team_events.team_id, auth.uid()));
+--
+-- create policy team_events_coach_insert on team_events
+--   for insert
+--   with check (exists (select 1 from teams t where t.id = team_events.team_id and t.coach_user_id = auth.uid()));
+--
+-- create policy team_events_coach_update on team_events
+--   for update
+--   using (exists (select 1 from teams t where t.id = team_events.team_id and t.coach_user_id = auth.uid()));
+--
+-- create policy team_events_coach_delete on team_events
+--   for delete
+--   using (exists (select 1 from teams t where t.id = team_events.team_id and t.coach_user_id = auth.uid()));
+--
+-- alter publication supabase_realtime add table team_events;
+--
+-- create table push_tokens (
+--   id uuid primary key default gen_random_uuid(),
+--   user_id uuid not null references auth.users(id) on delete cascade,
+--   expo_push_token text not null,
+--   updated_at timestamptz not null default now(),
+--   unique (user_id, expo_push_token)
+-- );
+--
+-- alter table push_tokens enable row level security;
+--
+-- create policy push_tokens_owner on push_tokens
+--   for all
+--   using (user_id = auth.uid())
+--   with check (user_id = auth.uid());
+--
+-- insert into storage.buckets (id, name, public)
+-- values ('team-media', 'team-media', false)
+-- on conflict (id) do nothing;
+--
+-- create policy team_media_select on storage.objects
+--   for select
+--   using (
+--     bucket_id = 'team-media'
+--     and is_on_team((storage.foldername(name))[1]::uuid, auth.uid())
+--   );
+--
+-- create policy team_media_insert on storage.objects
+--   for insert
+--   with check (
+--     bucket_id = 'team-media'
+--     and is_on_team((storage.foldername(name))[1]::uuid, auth.uid())
+--   );
+--
+-- create policy team_media_delete on storage.objects
+--   for delete
+--   using (
+--     bucket_id = 'team-media'
+--     and exists (
+--       select 1 from teams t
+--       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
 --     )
 --   );

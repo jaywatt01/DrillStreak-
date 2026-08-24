@@ -52,7 +52,14 @@
           "savePhotosPermission": "DrillStreak saves your recorded training clips to your Photos — it never keeps a copy itself."
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ffffff"
+        }
+      ]
     ]
   }
 }
