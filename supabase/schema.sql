@@ -2122,3 +2122,149 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
 --   group by p.created_by_user_id;
 -- $$;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-24, seventh batch —
+-- CORRECTED replacement for batches four through six above): Jay's first
+-- run of the combined fourth/fifth/sixth batches failed with
+-- `42P13: cannot change return type of existing function` /
+-- `Use DROP FUNCTION list_my_teams() first` — create or replace function
+-- can't change a table-returning function's column shape (list_my_teams
+-- gained `restricted`, list_team_contacts gained `role` then changed its
+-- fallback-label logic). This batch is the corrected, complete
+-- replacement for all of batches four through six — run this one
+-- instead, not those three. Every statement is idempotent (safe to
+-- re-run) in case any of it landed before the original error stopped the
+-- run. Explicit revoke/grant re-added after each drop+recreate, since
+-- dropping a function clears its existing grants — omitting them here
+-- would have left list_my_teams/list_team_contacts uncallable by
+-- `authenticated`, a much harder failure to diagnose than the original
+-- error (permission-denied instead of function-doesn't-exist).
+-- ---------------------------------------------------------------------------
+-- alter table profiles alter column age_attested_13_or_over drop not null;
+-- alter table profiles add column if not exists display_name text;
+--
+-- drop policy if exists profiles_owner_insert on profiles;
+-- create policy profiles_owner_insert on profiles
+--   for insert
+--   with check (user_id = auth.uid());
+--
+-- drop policy if exists profiles_owner_update on profiles;
+-- create policy profiles_owner_update on profiles
+--   for update
+--   using (user_id = auth.uid())
+--   with check (user_id = auth.uid());
+--
+-- alter table players add column if not exists is_account_holder boolean not null default false;
+--
+-- create or replace function is_player_restricted(p_team_id uuid, p_user_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     not exists (select 1 from teams t where t.id = p_team_id and t.coach_user_id = p_user_id)
+--     and exists (
+--       select 1 from team_memberships tm
+--       join players p on p.id = tm.player_id
+--       where tm.team_id = p_team_id
+--         and is_player_owner_or_guardian(p.id, p_user_id)
+--     )
+--     and not exists (
+--       select 1 from team_memberships tm
+--       join players p on p.id = tm.player_id
+--       where tm.team_id = p_team_id
+--         and is_player_owner_or_guardian(p.id, p_user_id)
+--         and p.is_account_holder = false
+--     );
+-- $$;
+--
+-- revoke all on function is_player_restricted(uuid, uuid) from public;
+-- revoke all on function is_player_restricted(uuid, uuid) from anon;
+-- grant execute on function is_player_restricted(uuid, uuid) to authenticated;
+--
+-- drop function if exists list_my_teams();
+-- create function list_my_teams()
+-- returns table(id uuid, name text, invite_code text, role text, restricted boolean)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.id, t.name, t.invite_code, 'coach'::text as role, false as restricted
+--   from teams t
+--   where t.coach_user_id = auth.uid()
+--   union
+--   select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role,
+--     is_player_restricted(t.id, auth.uid()) as restricted
+--   from teams t
+--   join team_memberships tm on tm.team_id = t.id
+--   where is_player_owner_or_guardian(tm.player_id, auth.uid())
+--     and t.coach_user_id <> auth.uid();
+-- $$;
+--
+-- revoke all on function list_my_teams() from public;
+-- revoke all on function list_my_teams() from anon;
+-- grant execute on function list_my_teams() to authenticated;
+--
+-- drop policy if exists team_messages_insert on team_messages;
+-- create policy team_messages_insert on team_messages
+--   for insert
+--   with check (
+--     author_user_id = auth.uid()
+--     and is_on_team(team_messages.team_id, auth.uid())
+--     and (recipient_user_id is null or is_on_team(team_messages.team_id, recipient_user_id))
+--     and (
+--       not is_player_restricted(team_messages.team_id, auth.uid())
+--       or recipient_user_id = (select coach_user_id from teams where id = team_messages.team_id)
+--     )
+--   );
+--
+-- drop function if exists list_team_contacts(uuid);
+-- create function list_team_contacts(p_team_id uuid)
+-- returns table(user_id uuid, label text, role text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.coach_user_id, coalesce(pr.display_name, 'Coach'), 'coach'::text
+--   from teams t
+--   left join profiles pr on pr.user_id = t.coach_user_id
+--   where t.id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--   union
+--   select g.guardian_user_id, coalesce(max(pr.display_name), 'Parent of ' || string_agg(distinct p.display_name, ', ')), 'guardian'::text
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   join guardianships g on g.player_id = p.id
+--   left join profiles pr on pr.user_id = g.guardian_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and g.guardian_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by g.guardian_user_id
+--   union
+--   select
+--     p.created_by_user_id,
+--     coalesce(
+--       max(pr.display_name),
+--       case
+--         when bool_and(p.is_account_holder) then string_agg(distinct p.display_name, ', ')
+--         else 'Parent of ' || string_agg(distinct p.display_name, ', ') filter (where not p.is_account_holder)
+--       end
+--     ),
+--     'guardian'::text
+--   from team_memberships tm
+--   join players p on p.id = tm.player_id
+--   left join profiles pr on pr.user_id = p.created_by_user_id
+--   where tm.team_id = p_team_id
+--     and is_on_team(p_team_id, auth.uid())
+--     and p.created_by_user_id <> (select coach_user_id from teams where id = p_team_id)
+--   group by p.created_by_user_id;
+-- $$;
+--
+-- revoke all on function list_team_contacts(uuid) from public;
+-- revoke all on function list_team_contacts(uuid) from anon;
+-- grant execute on function list_team_contacts(uuid) to authenticated;
