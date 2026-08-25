@@ -8,6 +8,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -316,14 +317,17 @@ export default function HomeScreen() {
     load();
   };
 
-  // Posts to the player's own team as a 24h card (see shareBadgeToTeam) —
-  // if they're on more than one team, ask which one rather than guessing
-  // or posting to all of them, since a badge earned in one context
-  // bragging into an unrelated team's feed would be a real surprise, not
-  // a nice one.
+  // Two genuinely different kinds of "share," real gap Jay caught — a
+  // badge just showing up on Home isn't shared with anyone, it's only
+  // visible to whoever owns/guards that player (plus a coach/opted-in
+  // teammate, same as any other stat). Long-press always asks which kind:
+  // "Team" posts the in-app 24h card (see shareBadgeToTeam); "outside the
+  // app" hands it to the OS share sheet — Messages, Instagram, wherever —
+  // same Share API already used for the invite-code share button, so
+  // there's nothing DrillStreak hosts or has custody of either way.
   const handleShareBadge = (playerId: string, teams: { id: string; name: string }[], badge: Badge) => {
     const label = BADGE_LABELS[badge.type];
-    const doShare = async (teamId: string) => {
+    const shareToTeam = async (teamId: string) => {
       try {
         await shareBadgeToTeam(teamId, badge.type, `🏆 ${label}!`);
         Alert.alert('Shared!', 'Visible to your team for the next 24 hours.');
@@ -331,17 +335,27 @@ export default function HomeScreen() {
         Alert.alert('Could not share', e instanceof Error ? e.message : 'Something went wrong.');
       }
     };
-    if (teams.length === 0) {
-      Alert.alert('No team yet', 'Join a team first to share badges with anyone.');
-      return;
-    }
-    if (teams.length === 1) {
-      doShare(teams[0].id);
-      return;
-    }
-    Alert.alert(`Share "${label}"`, 'Which team?', [
-      ...teams.map((t) => ({ text: t.name, onPress: () => doShare(t.id) })),
-      { text: 'Cancel', style: 'cancel' as const },
+    const chooseTeam = () => {
+      if (teams.length === 0) {
+        Alert.alert('No team yet', 'Join a team first to share badges with them.');
+        return;
+      }
+      if (teams.length === 1) {
+        shareToTeam(teams[0].id);
+        return;
+      }
+      Alert.alert(`Share "${label}" with your team`, 'Which team?', [
+        ...teams.map((t) => ({ text: t.name, onPress: () => shareToTeam(t.id) })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ]);
+    };
+    const shareOutsideApp = () => {
+      Share.share({ message: `🏆 ${label}! — via DrillStreak` });
+    };
+    Alert.alert(`Share "${label}"`, undefined, [
+      { text: 'Share with Team (24h)', onPress: chooseTeam },
+      { text: 'Share outside the app', onPress: shareOutsideApp },
+      { text: 'Cancel', style: 'cancel' },
     ]);
   };
 
@@ -768,7 +782,10 @@ export default function HomeScreen() {
                     </Pressable>
                   ))}
                 </View>
-                <Text style={styles.buildWorkoutHint}>Long-press a badge to share it with your team for 24h.</Text>
+                <Text style={styles.buildWorkoutHint}>
+                  Long-press a badge to share it with your team for 24h, or share it outside the
+                  app.
+                </Text>
               </View>
             ) : null}
 
