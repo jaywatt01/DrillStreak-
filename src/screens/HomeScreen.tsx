@@ -33,10 +33,11 @@ import {
   logCompletion,
   logDrillResult,
   Player,
+  wasStreakGraceUsed,
   WeeklyDrill,
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
-import { getPromptForResultsForPlayer } from '../lib/team';
+import { getPlayerTeams, getPromptForResultsForPlayer } from '../lib/team';
 import {
   acceptChallenge,
   Challenge,
@@ -46,6 +47,14 @@ import {
   getTeammates,
   Teammate,
 } from '../lib/challenges';
+import {
+  awardChallengeWonBadgeIfNeeded,
+  awardStreakBadgesIfNeeded,
+  Badge,
+  BADGE_LABELS,
+  listBadges,
+} from '../lib/badges';
+import { shareBadgeToTeam } from '../lib/teamMessages';
 import {
   deleteWorkoutTemplate,
   getSuggestedDrillsForCategory,
@@ -60,12 +69,15 @@ type PlayerCardData = {
   drills: WeeklyDrill[];
   source: 'team' | 'library';
   streak: number;
+  graceUsed: boolean;
   completedToday: Map<string, DrillResult>;
   promptForResults: boolean;
   challenges: Challenge[];
   categories: string[];
   allDrills: Drill[];
   workoutTemplates: WorkoutTemplate[];
+  badges: Badge[];
+  teams: { id: string; name: string }[];
 };
 
 // A Drill (from a category suggestion or a saved workout template) turned
@@ -198,6 +210,7 @@ export default function HomeScreen() {
             categories,
             allDrills,
             workoutTemplates,
+            teams,
           ] = await Promise.all([
             getWeeklyDrills(player.id),
             getCompletionDates(player.id),
@@ -207,18 +220,43 @@ export default function HomeScreen() {
             listDrillCategories(player.id),
             listAllDrills(player.id),
             listWorkoutTemplates(player.id),
+            getPlayerTeams(player.id),
           ]);
+          const streak = calculateStreak(dates);
+          const graceUsed = wasStreakGraceUsed(dates);
+
+          // Award-then-list, in that order, so a badge earned by this very
+          // load (a streak that just crossed a milestone, a challenge that
+          // just ended in a win) shows up immediately instead of a screen
+          // behind. Both awards are their own idempotent upsert (see
+          // lib/badges.ts) — safe to call on every load, not just once.
+          await awardStreakBadgesIfNeeded(player.id, streak);
+          await Promise.all(
+            challenges
+              .filter((c) => {
+                const isChallenger = c.challengerPlayerId === player.id;
+                const myCount = isChallenger ? c.challengerCompletions : c.opponentCompletions;
+                const theirCount = isChallenger ? c.opponentCompletions : c.challengerCompletions;
+                return c.accepted && daysLeft(c.endsAt) === 0 && myCount > theirCount;
+              })
+              .map((c) => awardChallengeWonBadgeIfNeeded(player.id, c.id))
+          );
+          const badges = await listBadges(player.id);
+
           return {
             player,
             drills,
             source,
-            streak: calculateStreak(dates),
+            streak,
+            graceUsed,
             completedToday,
             promptForResults,
             challenges,
             categories,
             allDrills,
             workoutTemplates,
+            badges,
+            teams,
           };
         })
       );
@@ -246,6 +284,35 @@ export default function HomeScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     load();
+  };
+
+  // Posts to the player's own team as a 24h card (see shareBadgeToTeam) —
+  // if they're on more than one team, ask which one rather than guessing
+  // or posting to all of them, since a badge earned in one context
+  // bragging into an unrelated team's feed would be a real surprise, not
+  // a nice one.
+  const handleShareBadge = (playerId: string, teams: { id: string; name: string }[], badge: Badge) => {
+    const label = BADGE_LABELS[badge.type];
+    const doShare = async (teamId: string) => {
+      try {
+        await shareBadgeToTeam(teamId, badge.type, `🏆 ${label}!`);
+        Alert.alert('Shared!', 'Visible to your team for the next 24 hours.');
+      } catch (e) {
+        Alert.alert('Could not share', e instanceof Error ? e.message : 'Something went wrong.');
+      }
+    };
+    if (teams.length === 0) {
+      Alert.alert('No team yet', 'Join a team first to share badges with anyone.');
+      return;
+    }
+    if (teams.length === 1) {
+      doShare(teams[0].id);
+      return;
+    }
+    Alert.alert(`Share "${label}"`, 'Which team?', [
+      ...teams.map((t) => ({ text: t.name, onPress: () => doShare(t.id) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
   };
 
   const handleMarkComplete = async (playerId: string, drill: WeeklyDrill, promptForResults: boolean) => {
@@ -576,12 +643,15 @@ export default function HomeScreen() {
             drills,
             source,
             streak,
+            graceUsed,
             completedToday,
             promptForResults,
             challenges,
             categories,
             allDrills,
             workoutTemplates,
+            badges,
+            teams,
           }) => {
             const suggestion = activeSuggestion[player.id];
             return (
@@ -596,7 +666,28 @@ export default function HomeScreen() {
               <Text style={styles.streakValue}>
                 {streak} {streak === 1 ? 'day' : 'days'}
               </Text>
+              {graceUsed ? (
+                <Text style={styles.graceNote}>🕊 A missed day this week was forgiven — streak kept.</Text>
+              ) : null}
             </View>
+
+            {badges.length > 0 ? (
+              <View style={styles.badgesSection}>
+                <Text style={styles.sectionTitle}>Badges</Text>
+                <View style={styles.chipRow}>
+                  {badges.map((b) => (
+                    <Pressable
+                      key={b.id}
+                      style={[styles.chip, styles.chipBadge]}
+                      onLongPress={() => handleShareBadge(player.id, teams, b)}
+                    >
+                      <Text style={styles.chipText}>🏅 {BADGE_LABELS[b.type]}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={styles.buildWorkoutHint}>Long-press a badge to share it with your team for 24h.</Text>
+              </View>
+            ) : null}
 
             <View style={styles.challengesSection}>
               <Text style={styles.sectionTitle}>Challenges</Text>
@@ -928,6 +1019,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   chipWorkout: { borderColor: colors.accent },
+  chipBadge: { borderColor: colors.accent, backgroundColor: '#FFF8EA' },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: 13, color: colors.text, fontWeight: '600' },
   chipTextSelected: { color: '#FFFFFF' },
@@ -940,6 +1032,8 @@ const styles = StyleSheet.create({
   },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
+  graceNote: { color: '#FFFFFF', fontSize: 12, opacity: 0.85, marginTop: 6 },
+  badgesSection: { gap: 6 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   addButton: {

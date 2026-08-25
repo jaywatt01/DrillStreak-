@@ -472,12 +472,19 @@ export default function TeamBoardScreen() {
               topLevelMessages.map((m) => (
                 <View key={m.id}>
                   <Pressable
-                    style={[styles.messageBubble, m.authorUserId === myUserId && styles.messageBubbleMine]}
+                    style={
+                      m.badgeType
+                        ? styles.badgeCard
+                        : [styles.messageBubble, m.authorUserId === myUserId && styles.messageBubbleMine]
+                    }
                     onLongPress={() => handleLongPressMessage(m)}
                   >
                     <Text style={styles.messageAuthor}>{authorLabel(m.authorUserId)}</Text>
-                    <Text style={styles.messageBody}>{m.body}</Text>
-                    <Text style={styles.messageMeta}>{new Date(m.createdAt).toLocaleString()}</Text>
+                    <Text style={m.badgeType ? styles.badgeCardBody : styles.messageBody}>{m.body}</Text>
+                    <Text style={styles.messageMeta}>
+                      {new Date(m.createdAt).toLocaleString()}
+                      {m.badgeType ? ' · visible for 24h' : ''}
+                    </Text>
                   </Pressable>
                   {repliesFor(m.id).map((r) => (
                     <Pressable
@@ -673,6 +680,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   pinnedLabel: { fontSize: 11, fontWeight: '700', color: colors.accentDark, marginBottom: 2 },
+  badgeCard: {
+    backgroundColor: '#FFF8EA',
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  badgeCardBody: { fontSize: 17, fontWeight: '700', color: colors.accentDark, marginTop: 2 },
   messageBubble: {
     backgroundColor: colors.surface,
     borderWidth: 1,
