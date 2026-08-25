@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { awardOffseasonBadgeIfNeeded, Badge, listBadges } from './badges';
+import { awardOffseasonBadgeIfNeeded, Badge, filterBadgesInRange, listBadges } from './badges';
 import { computeMakesAttemptsTotal, computeRepTallies, getCompletionHistory, isFreeThrowDrill, ShootingComposite } from './players';
 
 export type Season = {
@@ -152,11 +152,9 @@ export async function summarizeSeason(playerId: string, seasonId: string): Promi
     bestStreak = Math.max(bestStreak, run);
   }
 
-  const rangeStart = new Date(seasonRow.data.started_at).getTime();
-  const rangeEnd = seasonRow.data.ended_at ? new Date(seasonRow.data.ended_at).getTime() : Date.now();
-  const badges = allBadges.filter((b) => {
-    const earnedAt = new Date(b.earnedAt).getTime();
-    return earnedAt >= rangeStart && earnedAt <= rangeEnd;
+  const badges = filterBadgesInRange(allBadges, {
+    startedAt: seasonRow.data.started_at,
+    endedAt: seasonRow.data.ended_at,
   });
 
   return {
@@ -206,11 +204,30 @@ export function startOffseason(playerId: string, label?: string) {
   return switchSeason(playerId, true, label);
 }
 
+// Real threshold change, 2026-08-25, Jay-requested after testing the
+// original version himself: any single logged drill during an offseason
+// used to earn this badge (deliberately low-friction for the first
+// version). Jay's own read was that one workout was too easy — he asked
+// for something closer to "2 or 3 times a month" of sustained offseason
+// activity. This operationalizes that as roughly 2 completions per 30
+// days the offseason actually spanned (the low end of his range, so a
+// mostly-but-not-perfectly consistent player can still earn it), with a
+// floor of 2 total so a very short offseason isn't a free badge. The
+// exact number is a judgment call within the range Jay gave, not something
+// he specified to the digit — easy to retune if 2/month reads as too easy
+// or too hard once real players hit it.
+function minOffseasonCompletionsFor(season: Season): number {
+  if (!season.endedAt) return 2;
+  const durationDays = Math.max(
+    1,
+    (new Date(season.endedAt).getTime() - new Date(season.startedAt).getTime()) / 86400000
+  );
+  return Math.max(2, Math.ceil((durationDays / 30) * 2));
+}
+
 // Awards the offseason-completed badge here, not as a separate step the
 // caller has to remember — this is the one place "an offseason just
-// closed" is actually known. Only awards it if the closed season had real
-// logged activity (count > 0), never for toggling offseason on and
-// immediately back off.
+// closed" is actually known.
 export async function startInSeason(playerId: string, label?: string) {
   const result = await switchSeason(playerId, false, label);
   if (result.closedSeason?.isOffseason) {
@@ -219,7 +236,7 @@ export async function startInSeason(playerId: string, label?: string) {
       .select('id', { count: 'exact', head: true })
       .eq('season_id', result.closedSeason.id);
     if (error) throw error;
-    if ((count ?? 0) > 0) {
+    if ((count ?? 0) >= minOffseasonCompletionsFor(result.closedSeason)) {
       await awardOffseasonBadgeIfNeeded(playerId, result.closedSeason.id);
     }
   }

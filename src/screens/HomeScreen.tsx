@@ -57,9 +57,10 @@ import {
   Badge,
   BADGE_ICONS,
   BADGE_LABELS,
+  filterCurrentBadges,
   listBadges,
 } from '../lib/badges';
-import { shareBadgeToTeam } from '../lib/teamMessages';
+import { hasSharedBadgeSince, shareBadgeToTeam } from '../lib/teamMessages';
 import {
   deleteWorkoutTemplate,
   getSuggestedDrillsForCategory,
@@ -258,7 +259,7 @@ export default function HomeScreen() {
           // weekly goal, not a daily streak, so there's nothing to award
           // against while isOffseason is true.
           if (!isOffseason) {
-            await awardStreakBadgesIfNeeded(player.id, streak);
+            await awardStreakBadgesIfNeeded(player.id, streak, activeSeason?.id);
           }
           await Promise.all(
             challenges
@@ -326,12 +327,33 @@ export default function HomeScreen() {
   // app" hands it to the OS share sheet — Messages, Instagram, wherever —
   // same Share API already used for the invite-code share button, so
   // there's nothing DrillStreak hosts or has custody of either way.
-  const handleShareBadge = (playerId: string, teams: { id: string; name: string }[], badge: Badge) => {
+  const handleShareBadge = (
+    playerId: string,
+    activeSeason: Season | null,
+    teams: { id: string; name: string }[],
+    badge: Badge
+  ) => {
     const label = BADGE_LABELS[badge.type];
     const icon = BADGE_ICONS[badge.type];
+    // Share-once-per-season lock (Jay-requested, 2026-08-25): checked
+    // right before the insert, not just relied on as a UI-only guard — the
+    // whole point is stopping the same brag from going out to the team
+    // repeatedly, so it needs to hold even if the picker/alert flow is
+    // re-entered. No active season (never toggled) has no boundary to
+    // unlock it, so it falls back to "ever," matching how the streak
+    // badges themselves fall back to a global singleton in that case too.
+    const since = activeSeason ? activeSeason.startedAt : new Date(0).toISOString();
     const shareToTeam = async (teamId: string) => {
       try {
-        await shareBadgeToTeam(teamId, badge.type, `${icon} ${label}!`);
+        const alreadyShared = await hasSharedBadgeSince(playerId, teamId, badge.type, since);
+        if (alreadyShared) {
+          Alert.alert(
+            'Already shared this season',
+            `"${label}" was already shared with this team this season — it'll be shareable again once a new season starts.`
+          );
+          return;
+        }
+        await shareBadgeToTeam(teamId, playerId, badge.type, `${icon} ${label}!`);
         Alert.alert('Shared!', 'Visible to your team for the next 24 hours.');
       } catch (e) {
         Alert.alert('Could not share', e instanceof Error ? e.message : 'Something went wrong.');
@@ -770,26 +792,33 @@ export default function HomeScreen() {
               </View>
             ) : null}
 
-            {badges.length > 0 ? (
-              <View style={styles.badgesSection}>
-                <Text style={styles.sectionTitle}>Badges</Text>
-                <View style={styles.chipRow}>
-                  {badges.map((b) => (
-                    <Pressable
-                      key={b.id}
-                      style={[styles.chip, styles.chipBadge]}
-                      onLongPress={() => handleShareBadge(player.id, teams, b)}
-                    >
-                      <Text style={styles.chipText}>{BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}</Text>
-                    </Pressable>
-                  ))}
+            {(() => {
+              // Streak badges (7/30/60/100-day) reset every season, so
+              // only this season's earned ones show here — lifetime types
+              // (challenge_won, offseason_completed) always show, same as
+              // before. See filterCurrentBadges in lib/badges.ts.
+              const displayBadges = filterCurrentBadges(badges, activeSeason);
+              return displayBadges.length > 0 ? (
+                <View style={styles.badgesSection}>
+                  <Text style={styles.sectionTitle}>Badges</Text>
+                  <View style={styles.chipRow}>
+                    {displayBadges.map((b) => (
+                      <Pressable
+                        key={b.id}
+                        style={[styles.chip, styles.chipBadge]}
+                        onLongPress={() => handleShareBadge(player.id, activeSeason, teams, b)}
+                      >
+                        <Text style={styles.chipText}>{BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={styles.buildWorkoutHint}>
+                    Long-press a badge to share it with your team for 24h, or share it outside the
+                    app.
+                  </Text>
                 </View>
-                <Text style={styles.buildWorkoutHint}>
-                  Long-press a badge to share it with your team for 24h, or share it outside the
-                  app.
-                </Text>
-              </View>
-            ) : null}
+              ) : null;
+            })()}
 
             <View style={styles.challengesSection}>
               <Text style={styles.sectionTitle}>Challenges</Text>
