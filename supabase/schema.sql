@@ -992,6 +992,39 @@ create trigger completions_set_season
 before insert on completions
 for each row execute function set_completion_season();
 
+-- Reverses an accidental season toggle (added 2026-08-25, Jay-requested
+-- fail-safe). Not security-definer: runs under the caller's own RLS, same
+-- reasoning as set_completion_season() above — whoever can call this
+-- already has seasons_owner_access/seasons_coach_access on both rows. Does
+-- nothing (silently) if the ids don't belong to the same player, or if
+-- p_new_season_id isn't actually still open — both guard against a stale
+-- retry acting on state that's already moved on. Delete-before-reopen
+-- ordering is required: reopening p_previous_season_id while
+-- p_new_season_id still has ended_at null would violate
+-- seasons_one_active_per_player.
+create or replace function undo_season_switch(p_previous_season_id uuid, p_new_season_id uuid)
+returns void
+language plpgsql
+as $$
+declare
+  v_prev_player uuid;
+  v_new_player uuid;
+begin
+  select player_id into v_prev_player from seasons where id = p_previous_season_id;
+  select player_id into v_new_player from seasons where id = p_new_season_id and ended_at is null;
+
+  if v_prev_player is null or v_new_player is null or v_prev_player <> v_new_player then
+    return;
+  end if;
+
+  update completions set season_id = p_previous_season_id where season_id = p_new_season_id;
+  delete from seasons where id = p_new_season_id;
+  update seasons set ended_at = null where id = p_previous_season_id and ended_at is not null;
+end;
+$$;
+
+grant execute on function undo_season_switch(uuid, uuid) to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- is_on_team: security-definer helper for the Team Board build below (added
 -- 2026-08-24). Same reason as is_player_owner_or_guardian/player_has_prompt_
@@ -2821,3 +2854,32 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- create trigger completions_set_season
 -- before insert on completions
 -- for each row execute function set_completion_season();
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — undo_season_
+-- switch, the fail-safe for an accidental season toggle. Run against the
+-- live project — idempotent, safe even if part of this was already applied.
+-- No new table/column, just this one function.
+-- ---------------------------------------------------------------------------
+-- create or replace function undo_season_switch(p_previous_season_id uuid, p_new_season_id uuid)
+-- returns void
+-- language plpgsql
+-- as $$
+-- declare
+--   v_prev_player uuid;
+--   v_new_player uuid;
+-- begin
+--   select player_id into v_prev_player from seasons where id = p_previous_season_id;
+--   select player_id into v_new_player from seasons where id = p_new_season_id and ended_at is null;
+--
+--   if v_prev_player is null or v_new_player is null or v_prev_player <> v_new_player then
+--     return;
+--   end if;
+--
+--   update completions set season_id = p_previous_season_id where season_id = p_new_season_id;
+--   delete from seasons where id = p_new_season_id;
+--   update seasons set ended_at = null where id = p_previous_season_id and ended_at is not null;
+-- end;
+-- $$;
+--
+-- grant execute on function undo_season_switch(uuid, uuid) to authenticated;

@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { awardOffseasonBadgeIfNeeded } from './badges';
+import { awardOffseasonBadgeIfNeeded, Badge, listBadges } from './badges';
 import { computeMakesAttemptsTotal, computeRepTallies, getCompletionHistory, isFreeThrowDrill, ShootingComposite } from './players';
 
 export type Season = {
@@ -116,6 +116,7 @@ export type SeasonSummary = {
   totalReps: number;
   freeThrows: ShootingComposite | null;
   shooting: ShootingComposite | null;
+  badges: Badge[];
 };
 
 // The end-of-season recap and the Season History view both need the same
@@ -127,8 +128,20 @@ export type SeasonSummary = {
 // calculateStreak's job (that one specifically anchors to "today," which
 // has no meaning for a closed season) — it's just the longest run of
 // consecutive calendar days in this season's own sorted date list.
+//
+// Badges added 2026-08-25, real gap Jay caught: badges have no season_id
+// column (never needed one for anything else), so "earned during this
+// season" is derived here by filtering the player's badges against the
+// season's own started_at/ended_at range rather than a stored join —
+// cheap since a player only ever has a handful of badges, and avoids a
+// migration for a read-only, display-only grouping.
 export async function summarizeSeason(playerId: string, seasonId: string): Promise<SeasonSummary> {
-  const history = await getCompletionHistory(playerId, seasonId);
+  const [history, seasonRow, allBadges] = await Promise.all([
+    getCompletionHistory(playerId, seasonId),
+    supabase.from('seasons').select('started_at, ended_at').eq('id', seasonId).single(),
+    listBadges(playerId),
+  ]);
+  if (seasonRow.error) throw seasonRow.error;
   const dates = Array.from(new Set(history.map((h) => h.date))).sort();
 
   let bestStreak = dates.length > 0 ? 1 : 0;
@@ -139,12 +152,54 @@ export async function summarizeSeason(playerId: string, seasonId: string): Promi
     bestStreak = Math.max(bestStreak, run);
   }
 
+  const rangeStart = new Date(seasonRow.data.started_at).getTime();
+  const rangeEnd = seasonRow.data.ended_at ? new Date(seasonRow.data.ended_at).getTime() : Date.now();
+  const badges = allBadges.filter((b) => {
+    const earnedAt = new Date(b.earnedAt).getTime();
+    return earnedAt >= rangeStart && earnedAt <= rangeEnd;
+  });
+
   return {
     bestStreak,
     totalReps: computeRepTallies(history).reduce((sum, t) => sum + t.totalAttempts, 0),
     freeThrows: computeMakesAttemptsTotal(history, isFreeThrowDrill),
     shooting: computeMakesAttemptsTotal(history, (name) => !isFreeThrowDrill(name)),
+    badges,
   };
+}
+
+// Removes only the season row itself — never the completions logged
+// during it. completions.season_id references seasons(id) on delete set
+// null, so any drill logged in a deleted season simply falls back into
+// the player's unsegmented/all-time bucket (the same bucket every
+// completion lived in before seasons existed) instead of being lost.
+// Guarded to closed seasons only (`ended_at` not null) at the query
+// level, not just by what the UI happens to show — deleting the
+// currently active season would leave a player with no open season row,
+// which the rest of this feature (the partial unique index, the
+// completion-tagging trigger) doesn't expect.
+export async function deleteSeason(seasonId: string): Promise<void> {
+  const { error } = await supabase.from('seasons').delete().eq('id', seasonId).not('ended_at', 'is', null);
+  if (error) throw error;
+}
+
+// Reverses a season switch a player/coach didn't mean to make — the
+// specific "I fat-fingered the toggle" case, distinct from deleteSeason
+// above (which is a deliberate cleanup of an old season, not an undo of
+// the most recent action). Re-points any completions logged in the
+// brief accidentally-created season back onto the reopened one, deletes
+// the accidental season, then reopens the previous one — done as a
+// single Postgres function (see schema.sql) rather than three sequential
+// client calls so the three writes can't be left half-applied by a
+// mid-sequence failure, and so the delete-before-reopen ordering (required
+// by seasons_one_active_per_player) is enforced server-side, not just by
+// caller discipline.
+export async function undoSeasonSwitch(previousSeasonId: string, newSeasonId: string): Promise<void> {
+  const { error } = await supabase.rpc('undo_season_switch', {
+    p_previous_season_id: previousSeasonId,
+    p_new_season_id: newSeasonId,
+  });
+  if (error) throw error;
 }
 
 export function startOffseason(playerId: string, label?: string) {

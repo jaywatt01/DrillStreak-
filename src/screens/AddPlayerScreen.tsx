@@ -28,7 +28,7 @@ import {
   updatePlayerProfile,
 } from '../lib/players';
 import { joinTeamByInviteCode } from '../lib/team';
-import { defaultLabel, getActiveSeason, renameSeason, Season, startInSeason, startOffseason, summarizeSeason } from '../lib/seasons';
+import { defaultLabel, getActiveSeason, renameSeason, Season, startInSeason, startOffseason, summarizeSeason, undoSeasonSwitch } from '../lib/seasons';
 
 export default function AddPlayerScreen() {
   const navigation = useNavigation();
@@ -192,6 +192,22 @@ export default function AddPlayerScreen() {
     }
   };
 
+  // Fail-safe for a mistaken toggle (Jay-requested, 2026-08-25): offered
+  // right on the recap alert, the one moment right after a switch where
+  // "undo" still means something simple — reopen what just closed, drop
+  // what was just created. Not offered on the very-first-ever toggle for a
+  // player (no closedSeason, nothing to reopen to) — that's a
+  // deliberately narrower case than the general "delete a season" feature
+  // in Progress, see seasons.ts's deleteSeason/undoSeasonSwitch comments.
+  const handleUndoSwitch = async (previousSeasonId: string, newSeasonId: string) => {
+    try {
+      await undoSeasonSwitch(previousSeasonId, newSeasonId);
+      Alert.alert('Undone', 'Back to the previous season — nothing changed.');
+    } catch (e) {
+      Alert.alert('Could not undo', e instanceof Error ? e.message : 'Something went wrong.');
+    }
+  };
+
   const handleSwitchSeason = () => {
     if (!seasonPlayerId) return;
     const toOffseason = !(currentSeason?.isOffseason ?? false);
@@ -223,7 +239,14 @@ export default function AddPlayerScreen() {
                   : '';
                 Alert.alert(
                   `${result.closedSeason.label} — recap`,
-                  `Best streak: ${summary.bestStreak} ${summary.bestStreak === 1 ? 'day' : 'days'}\n${shootingLine}${ftLine}Total reps: ${summary.totalReps}\n\nSaved for good — see it anytime in Progress under Season History.`
+                  `Best streak: ${summary.bestStreak} ${summary.bestStreak === 1 ? 'day' : 'days'}\n${shootingLine}${ftLine}Total reps: ${summary.totalReps}\n\nSaved for good — see it anytime in Progress under Season History.`,
+                  [
+                    {
+                      text: 'Undo this switch',
+                      onPress: () => handleUndoSwitch(result.closedSeason!.id, result.newSeason.id),
+                    },
+                    { text: 'OK', style: 'cancel' },
+                  ]
                 );
               } else {
                 Alert.alert('Done', toOffseason ? 'Offseason started.' : 'New season started.');
