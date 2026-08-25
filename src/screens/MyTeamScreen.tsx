@@ -19,6 +19,7 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { colors } from '../theme/colors';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
+import WeekDotsRow from '../components/WeekDotsRow';
 import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
 import {
   assignDrillToTeam,
@@ -493,6 +494,31 @@ export default function MyTeamScreen() {
             </>
           )}
 
+          {roster.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle}>Team overview — this week</Text>
+              <Text style={styles.placeholder}>
+                A green dot means that player logged something that day. Tap a row for their full
+                history — this is the same data as the roster activity feed below, just grouped
+                by player instead of listed event-by-event, so it stays readable at a glance even
+                with 15-20 kids on the roster.
+              </Text>
+              {roster.map((p) => {
+                const datesThisWeek = rosterCompletions
+                  .filter((c) => c.playerId === p.id)
+                  .map((c) => c.date);
+                return (
+                  <Pressable key={p.id} style={styles.overviewRow} onPress={() => setStatsPlayer(p)}>
+                    <Text style={styles.overviewName} numberOfLines={1}>
+                      {p.display_name}
+                    </Text>
+                    <WeekDotsRow completedDates={datesThisWeek} />
+                  </Pressable>
+                );
+              })}
+            </>
+          ) : null}
+
           <Text style={styles.sectionTitle}>This week's drills</Text>
           <Text style={styles.placeholder}>
             Tap a drill to assign it to the whole team for this week. Tap
@@ -767,6 +793,18 @@ const styles = StyleSheet.create({
   rosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
   rosterLinks: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   statsLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
+  overviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+  },
+  overviewName: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1, marginRight: 12 },
   noteLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   messageLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   drillRow: {

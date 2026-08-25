@@ -1,9 +1,19 @@
 import { supabase } from './supabase';
 
+// Bio + stats_visible_to_team were added 2026-08-25 for teammate profile
+// viewing (see get_teammates in schema.sql) — the challenge picker (below)
+// ignores them and always shows every teammate; a profile-browsing screen
+// reads stats_visible_to_team to show "Private profile" for an opted-out
+// teammate instead of hiding them from the list outright.
 export type Teammate = {
   id: string;
   display_name: string;
   team_id: string;
+  position: string | null;
+  height: string | null;
+  weight: string | null;
+  grad_year: number | null;
+  stats_visible_to_team: boolean;
 };
 
 export type Challenge = {
