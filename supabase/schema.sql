@@ -728,12 +728,21 @@ grant execute on function accept_challenge(uuid) to authenticated;
 -- screen can show "Private profile" for an opted-out teammate instead of
 -- hiding them outright; completions_teammate_read above is the actual
 -- enforcement, this flag is just what the UI reads to decide what to show.
+-- "position" is quoted in this RETURNS TABLE list — real error hit live
+-- (2026-08-25): unquoted, it's a syntax error ("42601: syntax error at or
+-- near position") specifically in a function's RETURNS TABLE parameter
+-- list, even though the exact same word is a perfectly valid unquoted
+-- column name in a plain CREATE TABLE (see players.position above) —
+-- Postgres's RETURNS TABLE grammar parses more strictly than a table
+-- column list for a handful of SQL-standard reserved keywords. No quoting
+-- needed anywhere else this column is referenced (p.position, a plain
+-- select-list reference, is unambiguous).
 create or replace function get_teammates(p_player_id uuid)
 returns table(
   id uuid,
   display_name text,
   team_id uuid,
-  position text,
+  "position" text,
   height text,
   weight text,
   grad_year integer,
@@ -2499,7 +2508,7 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --   id uuid,
 --   display_name text,
 --   team_id uuid,
---   position text,
+--   "position" text,
 --   height text,
 --   weight text,
 --   grad_year integer,
