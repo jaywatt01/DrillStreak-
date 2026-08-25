@@ -55,6 +55,7 @@ import {
   awardChallengeWonBadgeIfNeeded,
   awardStreakBadgesIfNeeded,
   Badge,
+  BADGE_ICONS,
   BADGE_LABELS,
   listBadges,
 } from '../lib/badges';
@@ -327,9 +328,10 @@ export default function HomeScreen() {
   // there's nothing DrillStreak hosts or has custody of either way.
   const handleShareBadge = (playerId: string, teams: { id: string; name: string }[], badge: Badge) => {
     const label = BADGE_LABELS[badge.type];
+    const icon = BADGE_ICONS[badge.type];
     const shareToTeam = async (teamId: string) => {
       try {
-        await shareBadgeToTeam(teamId, badge.type, `🏆 ${label}!`);
+        await shareBadgeToTeam(teamId, badge.type, `${icon} ${label}!`);
         Alert.alert('Shared!', 'Visible to your team for the next 24 hours.');
       } catch (e) {
         Alert.alert('Could not share', e instanceof Error ? e.message : 'Something went wrong.');
@@ -350,7 +352,7 @@ export default function HomeScreen() {
       ]);
     };
     const shareOutsideApp = () => {
-      Share.share({ message: `🏆 ${label}! — via DrillStreak` });
+      Share.share({ message: `${icon} ${label}! — via DrillStreak` });
     };
     Alert.alert(`Share "${label}"`, undefined, [
       { text: 'Share with Team (24h)', onPress: chooseTeam },
@@ -731,7 +733,7 @@ export default function HomeScreen() {
             {isOffseason ? (
               <View style={styles.weeklyGoalCard}>
                 <Text style={styles.streakLabel}>This week's goal</Text>
-                <Text style={styles.streakValue}>
+                <Text style={styles.weeklyGoalValue}>
                   {weeklyGoalCount}/{WEEKLY_GOAL_TARGET} sessions
                 </Text>
                 <Text style={styles.graceNote}>
@@ -778,7 +780,7 @@ export default function HomeScreen() {
                       style={[styles.chip, styles.chipBadge]}
                       onLongPress={() => handleShareBadge(player.id, teams, b)}
                     >
-                      <Text style={styles.chipText}>🏅 {BADGE_LABELS[b.type]}</Text>
+                      <Text style={styles.chipText}>{BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -1138,6 +1140,10 @@ const styles = StyleSheet.create({
   },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
+  // Offseason card inverts the in-season scheme (gold box, blue number)
+  // instead of reusing streakValue's gold text — gold-on-gold on the
+  // weeklyGoalCard's accentDark background was unreadable (Jay-reported).
+  weeklyGoalValue: { color: colors.primaryDark, fontSize: 32, fontWeight: '700', marginTop: 4 },
   graceNote: { color: '#FFFFFF', fontSize: 12, opacity: 0.85, marginTop: 6 },
   focusCard: {
     borderWidth: 1,
