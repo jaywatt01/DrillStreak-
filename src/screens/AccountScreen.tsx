@@ -16,7 +16,8 @@ import { colors } from '../theme/colors';
 import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
 import { listMyTeams, listTeamContacts } from '../lib/teamMessages';
 import { listMyPlayers, Player } from '../lib/players';
-import { listBadges, Badge } from '../lib/badges';
+import { listBadges, Badge, filterCurrentBadges } from '../lib/badges';
+import { getActiveSeason } from '../lib/seasons';
 import BadgeLegend from '../components/BadgeLegend';
 import {
   isPurchasesConfigured,
@@ -34,7 +35,7 @@ export default function AccountScreen() {
   const [loadingName, setLoadingName] = useState(true);
   const [savingName, setSavingName] = useState(false);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [badgesByPlayer, setBadgesByPlayer] = useState<Record<string, Badge[]>>({});
+  const [badgesByPlayer, setBadgesByPlayer] = useState<Record<string, { all: Badge[]; currentSeason: Badge[] }>>({});
   const [loadingBadges, setLoadingBadges] = useState(true);
 
   useEffect(() => {
@@ -46,7 +47,10 @@ export default function AccountScreen() {
       .then(async (myPlayers) => {
         setPlayers(myPlayers);
         const entries = await Promise.all(
-          myPlayers.map(async (p) => [p.id, await listBadges(p.id)] as const)
+          myPlayers.map(async (p) => {
+            const [all, activeSeason] = await Promise.all([listBadges(p.id), getActiveSeason(p.id)]);
+            return [p.id, { all, currentSeason: filterCurrentBadges(all, activeSeason) }] as const;
+          })
         );
         setBadgesByPlayer(Object.fromEntries(entries));
       })
@@ -179,7 +183,10 @@ export default function AccountScreen() {
             players.map((p) => (
               <View key={p.id} style={styles.badgesPlayerBlock}>
                 {players.length > 1 ? <Text style={styles.badgesPlayerName}>{p.display_name}</Text> : null}
-                <BadgeLegend earnedBadges={badgesByPlayer[p.id] ?? []} />
+                <BadgeLegend
+                  currentSeasonBadges={badgesByPlayer[p.id]?.currentSeason ?? []}
+                  allBadges={badgesByPlayer[p.id]?.all ?? []}
+                />
               </View>
             ))
           )}

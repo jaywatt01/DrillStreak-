@@ -1229,7 +1229,14 @@ create table team_messages (
   -- in this app that's never actually destroyed.
   badge_type text,
   badge_label text,
-  expires_at timestamptz
+  expires_at timestamptz,
+  -- Added 2026-08-25 alongside the share-once-per-season lock: which
+  -- linked player a badge share is for. Set only on badge-share inserts,
+  -- null on every normal message — needed so two players on the same
+  -- team/account don't collide in has_shared_badge_since() below (without
+  -- it, sharing one kid's badge would look identical to another kid's on
+  -- the same account and wrongly lock out the second one).
+  player_id uuid references players(id) on delete cascade
 );
 
 alter table team_messages enable row level security;
@@ -1309,6 +1316,40 @@ create policy team_messages_update on team_messages
   with check (exists (select 1 from teams t where t.id = team_messages.team_id and t.coach_user_id = auth.uid()));
 
 alter publication supabase_realtime add table team_messages;
+
+-- Backs the share-once-per-season badge lock (2026-08-25, Jay-requested):
+-- a plain client-side select can't answer "did I already share this badge
+-- this season" because team_messages_select stops returning a share once
+-- its expires_at passes (by design, for the 24h-then-gone board display) —
+-- exactly the window this needs to see past. security-definer bypasses
+-- that on purpose, but only ever answers for the CALLING user's own posts
+-- (author_user_id = auth.uid() is baked in, not a caller-supplied
+-- parameter) — can't be used to probe anyone else's share history.
+create or replace function has_shared_badge_since(
+  p_player_id uuid,
+  p_team_id uuid,
+  p_badge_type text,
+  p_since timestamptz
+)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from team_messages
+    where team_id = p_team_id
+      and player_id = p_player_id
+      and badge_type = p_badge_type
+      and author_user_id = auth.uid()
+      and created_at >= p_since
+  );
+$$;
+
+revoke all on function has_shared_badge_since(uuid, uuid, text, timestamptz) from public;
+revoke all on function has_shared_badge_since(uuid, uuid, text, timestamptz) from anon;
+grant execute on function has_shared_badge_since(uuid, uuid, text, timestamptz) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- team_events: the shared team calendar (games, practices, meals).
@@ -2883,3 +2924,40 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- $$;
 --
 -- grant execute on function undo_season_switch(uuid, uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — season-scoped
+-- streak badges, badge share-once-per-season lock, harder offseason badge.
+-- Run against the live project — idempotent, safe even if part of this was
+-- already applied. No changes needed for the season-scoped streak-badge
+-- dedupe_key or the offseason-badge threshold — both are pure app-code
+-- changes (dedupe_key was already free text, the threshold check already
+-- lived in seasons.ts). Only the badge-share lock needs real SQL.
+-- ---------------------------------------------------------------------------
+-- alter table team_messages add column if not exists player_id uuid references players(id) on delete cascade;
+--
+-- create or replace function has_shared_badge_since(
+--   p_player_id uuid,
+--   p_team_id uuid,
+--   p_badge_type text,
+--   p_since timestamptz
+-- )
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select exists (
+--     select 1 from team_messages
+--     where team_id = p_team_id
+--       and player_id = p_player_id
+--       and badge_type = p_badge_type
+--       and author_user_id = auth.uid()
+--       and created_at >= p_since
+--   );
+-- $$;
+--
+-- revoke all on function has_shared_badge_since(uuid, uuid, text, timestamptz) from public;
+-- revoke all on function has_shared_badge_since(uuid, uuid, text, timestamptz) from anon;
+-- grant execute on function has_shared_badge_since(uuid, uuid, text, timestamptz) to authenticated;

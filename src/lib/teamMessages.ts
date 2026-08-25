@@ -69,10 +69,17 @@ export type TeamMessage = {
   // downstream needs to re-check it.
   badgeType: string | null;
   badgeLabel: string | null;
+  // Which linked player this badge share is for — set only alongside
+  // badgeType/badgeLabel. Added 2026-08-25 alongside the share-once-per-
+  // season lock: without it, a parent with two players on the same team
+  // would have both kids' badge shares look identical (same author,
+  // team, badge_type), and sharing kid A's 30-day badge would wrongly
+  // lock out sharing kid B's.
+  playerId: string | null;
 };
 
 const TEAM_MESSAGE_COLUMNS =
-  'id, team_id, author_user_id, recipient_user_id, parent_message_id, body, media_url, pinned, created_at, badge_type, badge_label';
+  'id, team_id, author_user_id, recipient_user_id, parent_message_id, body, media_url, pinned, created_at, badge_type, badge_label, player_id';
 
 function mapMessageRow(row: {
   id: string;
@@ -86,6 +93,7 @@ function mapMessageRow(row: {
   created_at: string;
   badge_type: string | null;
   badge_label: string | null;
+  player_id: string | null;
 }): TeamMessage {
   return {
     id: row.id,
@@ -99,6 +107,7 @@ function mapMessageRow(row: {
     createdAt: row.created_at,
     badgeType: row.badge_type,
     badgeLabel: row.badge_label,
+    playerId: row.player_id,
   };
 }
 
@@ -147,7 +156,12 @@ export async function sendTeamMessage(
 // a restricted account (self-signed-up player) that can't post to the
 // group feed can't share a badge to it either, same adults-only-group
 // boundary as everything else, not a special case carved out for this.
-export async function shareBadgeToTeam(teamId: string, badgeType: string, badgeLabel: string): Promise<TeamMessage> {
+export async function shareBadgeToTeam(
+  teamId: string,
+  playerId: string,
+  badgeType: string,
+  badgeLabel: string
+): Promise<TeamMessage> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
@@ -163,11 +177,41 @@ export async function shareBadgeToTeam(teamId: string, badgeType: string, badgeL
       badge_type: badgeType,
       badge_label: badgeLabel,
       expires_at: expiresAt,
+      player_id: playerId,
     })
     .select(TEAM_MESSAGE_COLUMNS)
     .single();
   if (error) throw error;
   return mapMessageRow(data);
+}
+
+// The share-once-per-season lock Jay asked for (2026-08-25): a badge can
+// only be shared to a given team once per season, then it's locked until
+// a new season starts. Can't just query team_messages directly for this —
+// team_messages_select RLS stops returning a share once its 24h
+// expires_at passes, which is exactly the window this needs to see PAST
+// (a share from 3 days ago has to still count as "already shared," even
+// though it's no longer visible on the board). So this goes through a
+// security-definer function (see schema.sql) that does its own explicit
+// check, scoped server-side to the caller's own author_user_id so it can
+// only ever answer "did I already share this," never anyone else's.
+// `since` is the active season's startedAt when one exists, or the epoch
+// (effectively "ever") when it doesn't — no season concept yet means no
+// boundary to unlock it, so it stays locked after the first share.
+export async function hasSharedBadgeSince(
+  playerId: string,
+  teamId: string,
+  badgeType: string,
+  since: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('has_shared_badge_since', {
+    p_player_id: playerId,
+    p_team_id: teamId,
+    p_badge_type: badgeType,
+    p_since: since,
+  });
+  if (error) throw error;
+  return data === true;
 }
 
 export async function deleteTeamMessage(messageId: string): Promise<void> {
