@@ -47,6 +47,7 @@ import {
   Teammate,
 } from '../lib/challenges';
 import {
+  deleteWorkoutTemplate,
   getSuggestedDrillsForCategory,
   listAllDrills,
   listDrillCategories,
@@ -155,6 +156,31 @@ export default function HomeScreen() {
 
   const clearSuggestion = (playerId: string) => {
     setActiveSuggestion((current) => ({ ...current, [playerId]: undefined }));
+  };
+
+  // Real gap Jay caught: the only way to delete a saved workout was to
+  // reopen the builder modal and find it in its own manage list — not
+  // obvious from Home, where the chip itself is the only thing most people
+  // would ever touch again. Long-press matches every other delete
+  // affordance already in this app (players, teams, custom drills all use
+  // the same pattern).
+  const handleLongPressWorkout = (playerId: string, template: WorkoutTemplate) => {
+    Alert.alert(`Delete "${template.name}"?`, "This can't be undone.", [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteWorkoutTemplate(template.id);
+            if (activeSuggestion[playerId]?.label === template.name) clearSuggestion(playerId);
+            await load();
+          } catch (e) {
+            Alert.alert('Could not delete workout', e instanceof Error ? e.message : 'Something went wrong.');
+          }
+        },
+      },
+    ]);
   };
 
   const load = useCallback(async () => {
@@ -520,6 +546,15 @@ export default function HomeScreen() {
     >
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      {cards.length > 0 ? (
+        <Pressable
+          style={styles.teammatesTopLink}
+          onPress={() => setTeammatesForPlayerId(cards[0].player.id)}
+        >
+          <Text style={styles.teammatesLink}>Teammates</Text>
+        </Pressable>
+      ) : null}
+
       {cards.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.sectionTitle}>No players yet</Text>
@@ -551,12 +586,7 @@ export default function HomeScreen() {
             const suggestion = activeSuggestion[player.id];
             return (
           <View key={player.id} style={styles.playerSection}>
-            <View style={styles.playerNameRow}>
-              <Text style={styles.playerName}>{player.display_name}</Text>
-              <Pressable onPress={() => setTeammatesForPlayerId(player.id)} hitSlop={8}>
-                <Text style={styles.teammatesLink}>Teammates</Text>
-              </Pressable>
-            </View>
+            <Text style={styles.playerName}>{player.display_name}</Text>
             {formatPlayerBio(player) ? (
               <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
             ) : null}
@@ -674,6 +704,7 @@ export default function HomeScreen() {
                   key={t.id}
                   style={[styles.chip, styles.chipWorkout, suggestion?.label === t.name && styles.chipSelected]}
                   onPress={() => handlePickWorkout(player.id, t)}
+                  onLongPress={() => handleLongPressWorkout(player.id, t)}
                 >
                   <Text style={[styles.chipText, suggestion?.label === t.name && styles.chipTextSelected]}>
                     🏀 {t.name}
@@ -681,6 +712,9 @@ export default function HomeScreen() {
                 </Pressable>
               ))}
             </View>
+            {workoutTemplates.length > 0 ? (
+              <Text style={styles.buildWorkoutHint}>Long-press a workout above to delete it.</Text>
+            ) : null}
             <Pressable onPress={() => setBuilderForPlayerId(player.id)} hitSlop={8}>
               <Text style={styles.buildWorkoutLink}>+ Build a custom workout</Text>
             </Pressable>
@@ -880,8 +914,8 @@ const styles = StyleSheet.create({
   error: { color: '#C4362B', fontSize: 13 },
   emptyState: { gap: 12 },
   playerSection: { gap: 10, marginBottom: 8 },
-  playerNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   playerName: { fontSize: 20, fontWeight: '700', color: colors.text },
+  teammatesTopLink: { alignSelf: 'flex-end' },
   teammatesLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   playerBio: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: -4 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -898,6 +932,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, color: colors.text, fontWeight: '600' },
   chipTextSelected: { color: '#FFFFFF' },
   buildWorkoutLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  buildWorkoutHint: { fontSize: 11, color: colors.textMuted, marginTop: -4 },
   streakCard: {
     backgroundColor: colors.primary,
     borderRadius: 16,

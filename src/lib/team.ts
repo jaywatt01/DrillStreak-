@@ -1,3 +1,4 @@
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { mondayOfThisWeek } from './date';
 import { DRILL_SELECT_COLUMNS, Drill, mapDrillRow } from './players';
@@ -286,4 +287,25 @@ export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): P
       };
     })
     .filter((c): c is RosterCompletion => c != null);
+}
+
+// Real UX gap Jay caught (2026-08-25): the Team Overview dots and the
+// roster activity feed only ever refreshed on tab focus/pull-to-refresh —
+// fine for switching between tabs, but not for a coach staying on My Team
+// while a player logs a drill elsewhere on the same account. `completions`
+// has no team_id column to filter on server-side the way
+// subscribeToTeamMessages does, so this subscribes unfiltered and relies
+// on completions' own RLS to scope what actually gets delivered per
+// session — same Realtime-respects-RLS behavior already confirmed and
+// relied on for team_messages. `event: '*'` (not just INSERT) so an
+// undone/deleted completion clears a dot live too, not just a newly
+// logged one. Caller just re-runs its own load() on any change rather
+// than trying to patch state incrementally — the payload doesn't carry
+// enough (no player display name) to update rosterCompletions in place
+// without a second lookup anyway.
+export function subscribeToRosterCompletions(onChange: () => void): RealtimeChannel {
+  return supabase
+    .channel('roster-completions')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'completions' }, () => onChange())
+    .subscribe();
 }
