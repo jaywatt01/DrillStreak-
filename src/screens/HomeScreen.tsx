@@ -19,7 +19,9 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import RecordClipModal from '../components/RecordClipModal';
 import TeammatesModal from '../components/TeammatesModal';
+import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import WorkoutBuilderModal from '../components/WorkoutBuilderModal';
+import { useParentEntitlement } from '../lib/purchases';
 import {
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
@@ -147,6 +149,13 @@ export default function HomeScreen() {
   const [recordingFor, setRecordingFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
   const [builderForPlayerId, setBuilderForPlayerId] = useState<string | null>(null);
   const [teammatesForPlayerId, setTeammatesForPlayerId] = useState<string | null>(null);
+  // Tap a player's own name on their Home card to see their own profile —
+  // same CoachPlayerStatsModal already used for coach/teammate viewing,
+  // now with hasParentTier passed so a free-tier account's own full
+  // history stays paywalled here too (see the prop's comment in that
+  // component for the bypass this closes).
+  const [viewingOwnProfileFor, setViewingOwnProfileFor] = useState<{ id: string; name: string } | null>(null);
+  const { hasParentTier } = useParentEntitlement();
   // Per-player "what to work on today" selection — null means the default
   // list below (this week's assignments or the full library) shows as-is.
   // A category or workout pick replaces it with a separate short "Suggested
@@ -746,7 +755,9 @@ export default function HomeScreen() {
             const WEEKLY_GOAL_TARGET = 4;
             return (
           <View key={player.id} style={styles.playerSection}>
-            <Text style={styles.playerName}>{player.display_name}</Text>
+            <Pressable onPress={() => setViewingOwnProfileFor({ id: player.id, name: player.display_name })}>
+              <Text style={styles.playerName}>{player.display_name}</Text>
+            </Pressable>
             {formatPlayerBio(player) ? (
               <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
             ) : null}
@@ -1116,6 +1127,14 @@ export default function HomeScreen() {
     />
     {teammatesForPlayerId ? (
       <TeammatesModal playerId={teammatesForPlayerId} onClose={() => setTeammatesForPlayerId(null)} />
+    ) : null}
+    {viewingOwnProfileFor ? (
+      <CoachPlayerStatsModal
+        playerId={viewingOwnProfileFor.id}
+        playerName={viewingOwnProfileFor.name}
+        hasParentTier={hasParentTier}
+        onClose={() => setViewingOwnProfileFor(null)}
+      />
     ) : null}
     {builderForPlayerId ? (
       <WorkoutBuilderModal

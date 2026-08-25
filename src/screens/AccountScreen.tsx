@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -19,6 +20,7 @@ import { listMyPlayers, Player } from '../lib/players';
 import { listBadges, Badge, filterCurrentBadges } from '../lib/badges';
 import { getActiveSeason } from '../lib/seasons';
 import BadgeLegend from '../components/BadgeLegend';
+import BadgeIconStrip from '../components/BadgeIconStrip';
 import {
   isPurchasesConfigured,
   purchaseParentTier,
@@ -37,6 +39,7 @@ export default function AccountScreen() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [badgesByPlayer, setBadgesByPlayer] = useState<Record<string, { all: Badge[]; currentSeason: Badge[] }>>({});
   const [loadingBadges, setLoadingBadges] = useState(true);
+  const [viewingBadgesFor, setViewingBadgesFor] = useState<Player | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
@@ -180,18 +183,53 @@ export default function AccountScreen() {
           {loadingBadges ? (
             <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
           ) : (
+            // Roster-style compact rows (2026-08-25, Jay-requested) — the
+            // full 6-card BadgeLegend grid repeated per player meant a lot
+            // of scrolling with 3+ kids on one account. Same relationship
+            // MyTeamScreen's roster rows have to CoachPlayerStatsModal: a
+            // compact row here (name + icon strip), tap through for the
+            // full legend with "how to earn" text and lifetime counts.
             players.map((p) => (
-              <View key={p.id} style={styles.badgesPlayerBlock}>
-                {players.length > 1 ? <Text style={styles.badgesPlayerName}>{p.display_name}</Text> : null}
-                <BadgeLegend
+              <Pressable key={p.id} style={styles.badgeRosterRow} onPress={() => setViewingBadgesFor(p)}>
+                <View style={styles.badgeRosterTopRow}>
+                  <Text style={styles.badgeRosterName}>{p.display_name}</Text>
+                  <Text style={styles.badgeRosterLink}>View →</Text>
+                </View>
+                <BadgeIconStrip
                   currentSeasonBadges={badgesByPlayer[p.id]?.currentSeason ?? []}
                   allBadges={badgesByPlayer[p.id]?.all ?? []}
                 />
-              </View>
+              </Pressable>
             ))
           )}
         </View>
       ) : null}
+
+      <Modal
+        visible={viewingBadgesFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewingBadgesFor(null)}
+      >
+        <View style={styles.badgeModalOverlay}>
+          <View style={styles.badgeModalCard}>
+            <View style={styles.badgeRosterTopRow}>
+              <Text style={styles.tierValue}>{viewingBadgesFor?.display_name}</Text>
+              <Pressable onPress={() => setViewingBadgesFor(null)} hitSlop={8}>
+                <Text style={styles.badgeRosterLink}>Close</Text>
+              </Pressable>
+            </View>
+            <ScrollView>
+              {viewingBadgesFor ? (
+                <BadgeLegend
+                  currentSeasonBadges={badgesByPlayer[viewingBadgesFor.id]?.currentSeason ?? []}
+                  allBadges={badgesByPlayer[viewingBadgesFor.id]?.all ?? []}
+                />
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.tierCard}>
         <Text style={styles.tierLabel}>Coach</Text>
@@ -321,8 +359,31 @@ const styles = StyleSheet.create({
     gap: 10,
     backgroundColor: colors.surface,
   },
-  badgesPlayerBlock: { gap: 8 },
-  badgesPlayerName: { fontSize: 14, fontWeight: '700', color: colors.text },
+  badgeRosterRow: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+  },
+  badgeRosterTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  badgeRosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  badgeRosterLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
+  badgeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  badgeModalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: '80%',
+    gap: 12,
+  },
   tierCardActive: {
     borderColor: colors.accent,
     backgroundColor: '#FFF8EA',
