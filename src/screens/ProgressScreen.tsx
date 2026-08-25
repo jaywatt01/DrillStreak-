@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
@@ -23,7 +23,8 @@ import {
   ShootingComposite,
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
-import { getActiveSeason, listSeasonHistory, renameSeason, Season, SeasonSummary, summarizeSeason } from '../lib/seasons';
+import { deleteSeason, getActiveSeason, listSeasonHistory, renameSeason, Season, SeasonSummary, summarizeSeason } from '../lib/seasons';
+import { BADGE_ICONS, BADGE_LABELS } from '../lib/badges';
 
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
@@ -58,6 +59,7 @@ export default function ProgressScreen() {
   const [loadingSeasonDetail, setLoadingSeasonDetail] = useState<string | null>(null);
   const [seasonRenameText, setSeasonRenameText] = useState('');
   const [savingSeasonRename, setSavingSeasonRename] = useState(false);
+  const [deletingSeason, setDeletingSeason] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -158,6 +160,48 @@ export default function ProgressScreen() {
     } finally {
       setSavingSeasonRename(false);
     }
+  };
+
+  // Deletes only the season row/grouping — deleteSeason (lib/seasons.ts)
+  // relies on completions.season_id's on-delete-set-null, so nothing a
+  // player logged during this season is actually lost, it just falls back
+  // into their all-time totals same as pre-Phase-3 history. Copy below says
+  // exactly that, deliberately — the same "reassure, don't sound like a
+  // delete-your-data warning" rule already used on the switch-season
+  // confirmations. Gated to closed seasons only (deleteSeason itself
+  // enforces this server-side too) — the active season is only ever
+  // removed by switching, not by this button.
+  const handleDeleteSeason = () => {
+    if (!seasonDetail) return;
+    const { season } = seasonDetail;
+    Alert.alert(
+      `Delete "${season.label}"?`,
+      "This removes the season grouping only — any drills logged during it stay saved and still count toward the all-time totals, they just won't be grouped under this season name anymore. This can't be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Season',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingSeason(true);
+            try {
+              await deleteSeason(season.id);
+              setProgress((current) =>
+                current.map((p) => ({
+                  ...p,
+                  pastSeasons: p.pastSeasons.filter((s) => s.id !== season.id),
+                }))
+              );
+              setSeasonDetail(null);
+            } catch (e) {
+              Alert.alert('Could not delete season', e instanceof Error ? e.message : 'Something went wrong.');
+            } finally {
+              setDeletingSeason(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading || entitlementLoading) {
@@ -428,10 +472,35 @@ export default function ProgressScreen() {
                   </View>
                 ) : null}
                 <Text style={styles.placeholder}>Total reps logged: {seasonDetail.summary.totalReps}</Text>
+                {seasonDetail.summary.badges.length > 0 ? (
+                  <View style={styles.seasonBadgesSection}>
+                    <Text style={styles.repTalliesLabel}>Badges earned this season</Text>
+                    <View style={styles.seasonBadgeRow}>
+                      {seasonDetail.summary.badges.map((b) => (
+                        <View key={b.id} style={styles.seasonBadgeChip}>
+                          <Text style={styles.seasonBadgeChipText}>
+                            {BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
               </View>
             ) : null}
             <Pressable style={styles.smallButton} onPress={() => setSeasonDetail(null)}>
               <Text style={styles.smallButtonText}>Close</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.smallButton, styles.deleteSeasonButton, deletingSeason && styles.buttonDisabled]}
+              onPress={handleDeleteSeason}
+              disabled={deletingSeason}
+            >
+              {deletingSeason ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.smallButtonText}>Delete Season</Text>
+              )}
             </Pressable>
           </View>
         </View>
@@ -563,6 +632,18 @@ const styles = StyleSheet.create({
   },
   smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   buttonDisabled: { opacity: 0.6 },
+  deleteSeasonButton: { backgroundColor: '#C4362B', marginTop: 8 },
+  seasonBadgesSection: { gap: 6 },
+  seasonBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  seasonBadgeChip: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFF8EA',
+  },
+  seasonBadgeChipText: { fontSize: 13, fontWeight: '600', color: colors.text },
   editButtonRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   input: {
     borderWidth: 1,

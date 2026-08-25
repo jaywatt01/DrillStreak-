@@ -43,7 +43,7 @@ import {
   unassignDrill,
   updateAssignmentSchedule,
 } from '../lib/team';
-import { startInSeason, startOffseason } from '../lib/seasons';
+import { startInSeason, startOffseason, undoSeasonSwitch } from '../lib/seasons';
 
 // "HH:MM:SS" (Postgres `time`) <-> a plain Date used just to drive the
 // picker UI. Only the hour/minute round-trip through the database.
@@ -272,9 +272,38 @@ export default function MyTeamScreen() {
             setError(null);
             try {
               const action = toOffseason ? startOffseason : startInSeason;
-              await Promise.all(roster.map((p) => action(p.id, teamSeasonLabel)));
+              const results = await Promise.all(roster.map((p) => action(p.id, teamSeasonLabel)));
               setTeamSeasonLabel('');
-              Alert.alert('Done', toOffseason ? 'Offseason started for the whole team.' : 'New season started for the whole team.');
+              // Same fail-safe as the individual switch on Add a Player,
+              // scoped to whichever players in this batch actually had a
+              // season to close (a player on their very first-ever toggle
+              // has no closedSeason and is left out — nothing to reopen).
+              const undoablePairs = results
+                .map((r) => (r.closedSeason ? { previousId: r.closedSeason.id, newId: r.newSeason.id } : null))
+                .filter((r): r is { previousId: string; newId: string } => r != null);
+              Alert.alert(
+                'Done',
+                toOffseason ? 'Offseason started for the whole team.' : 'New season started for the whole team.',
+                undoablePairs.length > 0
+                  ? [
+                      {
+                        text: 'Undo for whole team',
+                        onPress: async () => {
+                          try {
+                            await Promise.all(undoablePairs.map((p) => undoSeasonSwitch(p.previousId, p.newId)));
+                            Alert.alert('Undone', 'Back to the previous season for everyone.');
+                          } catch (e) {
+                            Alert.alert(
+                              'Could not undo',
+                              e instanceof Error ? e.message : 'Something went wrong — some players may not have reverted.'
+                            );
+                          }
+                        },
+                      },
+                      { text: 'OK', style: 'cancel' },
+                    ]
+                  : undefined
+              );
             } catch (e) {
               setError(e instanceof Error ? e.message : 'Failed to switch season for one or more players.');
             } finally {
