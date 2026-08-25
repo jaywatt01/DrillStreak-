@@ -409,11 +409,28 @@ export default function HomeScreen() {
     }
   };
 
+  // Real bug Jay caught: the picker showed every teammate, including
+  // someone already in a pending or active challenge with this player —
+  // letting a second challenge get created against the same opponent
+  // while the first one hadn't even finished. Excludes anyone with a
+  // not-yet-ended challenge (pending OR accepted-and-still-running); an
+  // ENDED challenge doesn't exclude them — a rematch against someone
+  // you've already played stays allowed, only a genuine duplicate is
+  // blocked.
   const openChallengePicker = async (playerId: string) => {
     setChallengingFor(playerId);
     setLoadingTeammates(true);
     try {
-      setTeammates(await getTeammates(playerId));
+      const [allTeammates, existingChallenges] = await Promise.all([
+        getTeammates(playerId),
+        getChallengesForPlayer(playerId),
+      ]);
+      const busyOpponentIds = new Set(
+        existingChallenges
+          .filter((c) => !c.accepted || daysLeft(c.endsAt) > 0)
+          .map((c) => (c.challengerPlayerId === playerId ? c.opponentPlayerId : c.challengerPlayerId))
+      );
+      setTeammates(allTeammates.filter((t) => !busyOpponentIds.has(t.id)));
     } catch (e) {
       Alert.alert('Could not load teammates', e instanceof Error ? e.message : 'Something went wrong.');
       setChallengingFor(null);
