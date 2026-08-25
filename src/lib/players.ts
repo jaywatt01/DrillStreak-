@@ -435,9 +435,30 @@ export async function getPlayerNotes(playerId: string): Promise<PlayerNote[]> {
   return (data ?? []).map((row) => ({ note: row.note as string, updatedAt: row.updated_at as string }));
 }
 
-export function calculateStreak(sortedDescendingDates: string[]): number {
-  if (sortedDescendingDates.length === 0) return 0;
+// Milliseconds-based day difference between two Dates already normalized
+// to local midnight — used only for the grace-day cooldown check below,
+// where both inputs are always midnight-aligned cursor positions, never
+// arbitrary times, so a plain ms diff is safe (no DST half-day drift risk
+// across the short 7-day windows this checks).
+function daysBetween(a: Date, b: Date): number {
+  return Math.round(Math.abs(a.getTime() - b.getTime()) / 86400000);
+}
 
+// Streak-with-grace: one missed day per rolling 7 days doesn't break the
+// streak, added 2026-08-25 per Jay's "streak grace day" ask — reduces the
+// exact "stress-inducing carrot-and-stick" risk this repo's own ClassDojo
+// design notes already flag, without weakening the accountability signal
+// (a grace day is spent, not free — a SECOND miss within 7 days of the
+// last spent grace still breaks the streak same as before). A grace day
+// is never counted as a "done" day itself — it only lets the walk
+// continue past it; the returned streak length only counts real logged
+// days. Shared internal implementation for both public functions below,
+// so "what counts" can never drift between the number shown and the
+// transparency note about how it was reached.
+function walkStreakWithGrace(sortedDescendingDates: string[]): { streak: number; graceUsed: boolean } {
+  if (sortedDescendingDates.length === 0) return { streak: 0, graceUsed: false };
+
+  const completed = new Set(sortedDescendingDates);
   const today = todayDateString();
   const yesterdayDate = new Date();
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
@@ -445,26 +466,50 @@ export function calculateStreak(sortedDescendingDates: string[]): number {
 
   const mostRecent = sortedDescendingDates[0];
   if (mostRecent !== today && mostRecent !== yesterdayStr) {
-    return 0;
+    return { streak: 0, graceUsed: false };
   }
 
-  let streak = 1;
   // Built from the parsed year/month/day, not `new Date(mostRecent)` —
   // parsing a bare "YYYY-MM-DD" string parses it as UTC midnight per the
   // JS spec, not local midnight, which is exactly the class of bug fixed
   // in lib/date.ts (see localDateString's comment).
   const [mostRecentYear, mostRecentMonth, mostRecentDay] = mostRecent.split('-').map(Number);
-  let cursor = new Date(mostRecentYear, mostRecentMonth - 1, mostRecentDay);
-  for (let i = 1; i < sortedDescendingDates.length; i++) {
-    cursor.setDate(cursor.getDate() - 1);
-    const expected = localDateString(cursor);
-    if (sortedDescendingDates[i] === expected) {
+  const cursor = new Date(mostRecentYear, mostRecentMonth - 1, mostRecentDay);
+
+  let streak = 0;
+  let graceUsed = false;
+  let lastGraceDate: Date | null = null;
+
+  while (true) {
+    const cursorStr = localDateString(cursor);
+    if (completed.has(cursorStr)) {
       streak++;
-    } else {
-      break;
+      cursor.setDate(cursor.getDate() - 1);
+      continue;
     }
+    const graceAvailable = !lastGraceDate || daysBetween(cursor, lastGraceDate) >= 7;
+    if (graceAvailable) {
+      lastGraceDate = new Date(cursor);
+      graceUsed = true;
+      cursor.setDate(cursor.getDate() - 1);
+      continue;
+    }
+    break;
   }
-  return streak;
+
+  return { streak, graceUsed };
+}
+
+export function calculateStreak(sortedDescendingDates: string[]): number {
+  return walkStreakWithGrace(sortedDescendingDates).streak;
+}
+
+// Whether the CURRENT streak (the number calculateStreak just returned)
+// relied on a forgiven miss to stay unbroken — purely for a transparency
+// note in the UI, so "why does my streak say 12 when I know I missed a
+// day" has a visible answer instead of looking like a bug.
+export function wasStreakGraceUsed(sortedDescendingDates: string[]): boolean {
+  return walkStreakWithGrace(sortedDescendingDates).graceUsed;
 }
 
 // Upsert with ignoreDuplicates so a double-tap, a race between two devices,

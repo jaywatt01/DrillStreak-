@@ -865,6 +865,63 @@ revoke all on function get_player_challenges(uuid) from anon;
 grant execute on function get_player_challenges(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- badges: earned, private-by-default achievements (added 2026-08-25, Phase
+-- 2 of the value-add brainstorm). Two types for v1: streak_7/streak_30/
+-- streak_100 (crossed via calculateStreak, awarded client-side the first
+-- time Home/Progress loads a streak at or past that number) and
+-- challenge_won (awarded client-side when an ended challenge's counts show
+-- this player ahead). Client-awarded rather than a server-side trigger —
+-- badges are a cosmetic/motivational layer, not accountability data, so
+-- porting the streak-with-grace algorithm into SQL to award these
+-- server-side would be real complexity this doesn't need. Idempotency is
+-- still enforced at the data layer, not just trusted client-side:
+-- dedupe_key (below) plus a unique constraint means a re-triggered award
+-- from a re-render, a second device, or a retried request can't create a
+-- duplicate — same upsert-with-ignoreDuplicates shape as completions'
+-- own dedup.
+-- ---------------------------------------------------------------------------
+create table badges (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  type text not null,
+  -- The actual idempotency key: `type` itself for a singleton badge
+  -- (streak_7/30/100 — only ever earned once per player), or
+  -- 'challenge_won:' || challenge_id for a per-challenge badge (won more
+  -- than once, one badge each time). A single `unique(player_id, type)`
+  -- constraint can't express both shapes at once — this can, with one
+  -- column and one constraint.
+  dedupe_key text not null,
+  challenge_id uuid references challenges(id) on delete set null,
+  earned_at timestamptz not null default now(),
+  unique (player_id, dedupe_key)
+);
+
+alter table badges enable row level security;
+
+create policy badges_owner_access on badges
+  for all
+  using (is_player_owner_or_guardian(badges.player_id, auth.uid()));
+
+create policy badges_coach_read on badges
+  for select
+  using (
+    exists (
+      select 1 from team_memberships tm
+      join teams t on t.id = tm.team_id
+      where tm.player_id = badges.player_id and t.coach_user_id = auth.uid()
+    )
+  );
+
+-- Same opt-out visibility as stats — a teammate sees badges only if this
+-- player's stats_visible_to_team is still true, one flag governing both.
+create policy badges_teammate_read on badges
+  for select
+  using (
+    exists (select 1 from players p where p.id = badges.player_id and p.stats_visible_to_team = true)
+    and is_teammate_of(badges.player_id, auth.uid())
+  );
+
+-- ---------------------------------------------------------------------------
 -- is_on_team: security-definer helper for the Team Board build below (added
 -- 2026-08-24). Same reason as is_player_owner_or_guardian/player_has_prompt_
 -- for_results above — teams_coach_access restricts SELECT on `teams` to the
@@ -1053,18 +1110,37 @@ create table team_messages (
   body text not null,
   media_url text,
   pinned boolean not null default false,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Added 2026-08-25, Phase 2 badge sharing: badge_type/badge_label turn a
+  -- normal team-wide post into a rendered badge card instead of plain
+  -- text — denormalized (a label snapshot, not a live FK to badges) so
+  -- Team Board's existing team_messages_select RLS is the only
+  -- authorization this needs; a badges-table FK would need its own extra
+  -- read-grant to whoever can already see this message, which the shared
+  -- opt-out visibility flag already handles once, not twice.
+  -- expires_at implements the 24h-then-gone behavior Jay asked for —
+  -- nothing physically deletes the row (no scheduled job in this stack),
+  -- team_messages_select below just stops returning it once expired,
+  -- same "gone from every screen, still exists" shape as everything else
+  -- in this app that's never actually destroyed.
+  badge_type text,
+  badge_label text,
+  expires_at timestamptz
 );
 
 alter table team_messages enable row level security;
 
 -- Team-wide messages (recipient_user_id null) are visible to anyone on the
--- team; a DM is visible only to the two people in it.
+-- team; a DM is visible only to the two people in it. Widened 2026-08-25:
+-- an expired badge share (expires_at in the past) stops matching for
+-- everyone, coach included — a expired brag isn't worth a moderation
+-- exception.
 create policy team_messages_select on team_messages
   for select
   using (
     is_on_team(team_messages.team_id, auth.uid())
     and (recipient_user_id is null or auth.uid() in (author_user_id, recipient_user_id))
+    and (expires_at is null or expires_at > now())
   );
 
 -- is_team_coach: security-definer, same reason as is_on_team/
@@ -2566,4 +2642,59 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       where wt.id = workout_template_drills.template_id
 --         and is_player_owner_or_guardian(wt.player_id, auth.uid())
 --     )
+--   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — Phase 2:
+-- badges (streak milestones + challenge wins) and 24h badge sharing on
+-- Team Board. Run against the live project — every statement is
+-- idempotent, safe even if part of this was already applied.
+-- ---------------------------------------------------------------------------
+-- create table if not exists badges (
+--   id uuid primary key default gen_random_uuid(),
+--   player_id uuid not null references players(id) on delete cascade,
+--   type text not null,
+--   dedupe_key text not null,
+--   challenge_id uuid references challenges(id) on delete set null,
+--   earned_at timestamptz not null default now(),
+--   unique (player_id, dedupe_key)
+-- );
+--
+-- alter table badges enable row level security;
+--
+-- drop policy if exists badges_owner_access on badges;
+-- create policy badges_owner_access on badges
+--   for all
+--   using (is_player_owner_or_guardian(badges.player_id, auth.uid()));
+--
+-- drop policy if exists badges_coach_read on badges;
+-- create policy badges_coach_read on badges
+--   for select
+--   using (
+--     exists (
+--       select 1 from team_memberships tm
+--       join teams t on t.id = tm.team_id
+--       where tm.player_id = badges.player_id and t.coach_user_id = auth.uid()
+--     )
+--   );
+--
+-- drop policy if exists badges_teammate_read on badges;
+-- create policy badges_teammate_read on badges
+--   for select
+--   using (
+--     exists (select 1 from players p where p.id = badges.player_id and p.stats_visible_to_team = true)
+--     and is_teammate_of(badges.player_id, auth.uid())
+--   );
+--
+-- alter table team_messages add column if not exists badge_type text;
+-- alter table team_messages add column if not exists badge_label text;
+-- alter table team_messages add column if not exists expires_at timestamptz;
+--
+-- drop policy if exists team_messages_select on team_messages;
+-- create policy team_messages_select on team_messages
+--   for select
+--   using (
+--     is_on_team(team_messages.team_id, auth.uid())
+--     and (recipient_user_id is null or auth.uid() in (author_user_id, recipient_user_id))
+--     and (expires_at is null or expires_at > now())
 --   );

@@ -61,10 +61,18 @@ export type TeamMessage = {
   mediaUrl: string | null;
   pinned: boolean;
   createdAt: string;
+  // Set together, always both or neither (see shareBadgeToTeam below) —
+  // when set, TeamBoardScreen renders this row as a badge card instead of
+  // plain body text. expiresAt isn't exposed here: team_messages_select
+  // RLS already stops returning an expired row to anyone, so by the time
+  // a badge message reaches the client it's always still valid — nothing
+  // downstream needs to re-check it.
+  badgeType: string | null;
+  badgeLabel: string | null;
 };
 
 const TEAM_MESSAGE_COLUMNS =
-  'id, team_id, author_user_id, recipient_user_id, parent_message_id, body, media_url, pinned, created_at';
+  'id, team_id, author_user_id, recipient_user_id, parent_message_id, body, media_url, pinned, created_at, badge_type, badge_label';
 
 function mapMessageRow(row: {
   id: string;
@@ -76,6 +84,8 @@ function mapMessageRow(row: {
   media_url: string | null;
   pinned: boolean;
   created_at: string;
+  badge_type: string | null;
+  badge_label: string | null;
 }): TeamMessage {
   return {
     id: row.id,
@@ -87,6 +97,8 @@ function mapMessageRow(row: {
     mediaUrl: row.media_url,
     pinned: row.pinned,
     createdAt: row.created_at,
+    badgeType: row.badge_type,
+    badgeLabel: row.badge_label,
   };
 }
 
@@ -122,6 +134,35 @@ export async function sendTeamMessage(
       recipient_user_id: options?.recipientUserId ?? null,
       parent_message_id: options?.parentMessageId ?? null,
       body,
+    })
+    .select(TEAM_MESSAGE_COLUMNS)
+    .single();
+  if (error) throw error;
+  return mapMessageRow(data);
+}
+
+// Posts a badge as a team-wide card (recipient_user_id null — a badge
+// brag is for the whole team, never a DM) that stops showing up 24h from
+// now. Reuses the exact same insert path/RLS as a normal team-wide post —
+// a restricted account (self-signed-up player) that can't post to the
+// group feed can't share a badge to it either, same adults-only-group
+// boundary as everything else, not a special case carved out for this.
+export async function shareBadgeToTeam(teamId: string, badgeType: string, badgeLabel: string): Promise<TeamMessage> {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) throw new Error('Not signed in');
+
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from('team_messages')
+    .insert({
+      team_id: teamId,
+      author_user_id: userId,
+      body: badgeLabel,
+      badge_type: badgeType,
+      badge_label: badgeLabel,
+      expires_at: expiresAt,
     })
     .select(TEAM_MESSAGE_COLUMNS)
     .single();

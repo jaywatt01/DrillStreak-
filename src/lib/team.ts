@@ -76,6 +76,25 @@ export async function setPromptForResults(teamId: string, value: boolean): Promi
   if (error) throw error;
 }
 
+// The team(s) this player belongs to, with names — for the badge-share
+// picker, which needs to know where "share to team" can actually post.
+// Direct query against team_memberships is fine here (not an RPC like
+// get_teammates needs) because team_memberships_access already grants an
+// owner/guardian read access to their OWN player's membership rows —
+// this only ever asks about a player the caller already owns/guards.
+export async function getPlayerTeams(playerId: string): Promise<{ id: string; name: string }[]> {
+  const { data, error } = await supabase
+    .from('team_memberships')
+    .select('teams(id, name)')
+    .eq('player_id', playerId);
+  if (error) throw error;
+  return (data ?? [])
+    .flatMap((row) => {
+      const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
+      return team ? [{ id: team.id as string, name: team.name as string }] : [];
+    });
+}
+
 export async function getRoster(teamId: string): Promise<RosterPlayer[]> {
   const { data, error } = await supabase
     .from('team_memberships')
