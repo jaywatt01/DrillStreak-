@@ -23,13 +23,19 @@ import { mondayOfThisWeek } from '../lib/date';
 import { getActiveSeason, Season } from '../lib/seasons';
 import { Badge, filterCurrentBadges, listBadges } from '../lib/badges';
 
-// How much calendar history to render — matches ProgressScreen's
-// parent-tier view. What actually shows up in `history` is already gated
-// server-side by the completions_coach_read RLS policy (current week only,
-// unless this coach has a real multi-family roster or doesn't own/guard
-// this player) — this component just renders whatever it's handed, same
-// as ProgressScreen does for its own tier gating.
-const CALENDAR_WEEKS = 12;
+// How much calendar history to render. For the coach/teammate paths (no
+// hasParentTier passed), what shows up in `history` is already gated
+// server-side by completions_coach_read/completions_teammate_read RLS, so
+// a fixed full-width calendar is correct there — this component just
+// renders whatever it's handed. For the self-view path (hasParentTier
+// passed), the calendar needs the SAME free/paid split ProgressScreen
+// already applies (CALENDAR_WEEKS_FULL/FREE there) — real gap found and
+// fixed 2026-08-25: this constant was hardcoded to the full width
+// regardless of tier, so a free-tier account viewing their own profile
+// through the new self-view door would've seen 12 weeks of calendar
+// instead of the 1 week Progress caps them to for the same data.
+const CALENDAR_WEEKS_FULL = 12;
+const CALENDAR_WEEKS_FREE = 1;
 
 type Props = {
   playerId: string;
@@ -192,7 +198,10 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose, h
                 </View>
               ) : null}
 
-              <StreakCalendar completedDates={allDates} weeks={CALENDAR_WEEKS} />
+              <StreakCalendar
+                completedDates={allDates}
+                weeks={hasParentTier === false ? CALENDAR_WEEKS_FREE : CALENDAR_WEEKS_FULL}
+              />
 
               {notes.length > 0 ? (
                 <View style={styles.notesSection}>
