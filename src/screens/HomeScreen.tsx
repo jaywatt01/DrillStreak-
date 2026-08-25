@@ -737,13 +737,20 @@ export default function HomeScreen() {
               </View>
             )}
 
-            {isOffseason && focusSuggestion ? (
+            {isOffseason ? (
               <View style={styles.focusCard}>
                 <Text style={styles.focusLabel}>Suggested focus this offseason</Text>
-                <Text style={styles.focusBody}>
-                  {focusSuggestion.category} was your lowest shooting % last season ({focusSuggestion.pct}%,{' '}
-                  {focusSuggestion.makes}/{focusSuggestion.attempts}). Worth extra reps there.
-                </Text>
+                {focusSuggestion ? (
+                  <Text style={styles.focusBody}>
+                    {focusSuggestion.category} was your lowest shooting % last season ({focusSuggestion.pct}%,{' '}
+                    {focusSuggestion.makes}/{focusSuggestion.attempts}). Worth extra reps there.
+                  </Text>
+                ) : (
+                  <Text style={styles.focusBody}>
+                    Not enough shooting data from a prior season yet — this shows up once you've
+                    completed a full in-season with at least 5 shots logged in one category.
+                  </Text>
+                )}
               </View>
             ) : null}
 

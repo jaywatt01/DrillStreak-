@@ -53,7 +53,21 @@ export async function listSeasonHistory(playerId: string): Promise<Season[]> {
   return (data ?? []).map(mapSeasonRow);
 }
 
-function defaultLabel(isOffseason: boolean): string {
+// Renames any season — active or already closed. Added 2026-08-25, real
+// gap Jay caught: the auto-generated label ("Season — August 2026") was
+// always usable but never editable, at creation or after. Same RLS as
+// everything else here (owner/guardian or coach), no new policy needed —
+// this is just a plain update on a row those policies already cover.
+export async function renameSeason(seasonId: string, label: string): Promise<void> {
+  const trimmed = label.trim();
+  if (!trimmed) return;
+  const { error } = await supabase.from('seasons').update({ label: trimmed }).eq('id', seasonId);
+  if (error) throw error;
+}
+
+// Exported so the UI can pre-fill a label input with the same default
+// this would fall back to, before the season actually exists to rename.
+export function defaultLabel(isOffseason: boolean): string {
   const month = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   return isOffseason ? `Offseason — ${month}` : `Season — ${month}`;
 }
