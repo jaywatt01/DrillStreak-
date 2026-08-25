@@ -14,9 +14,11 @@ export type Player = {
   weight: string | null;
   grad_year: number | null;
   position: string | null;
+  stats_visible_to_team: boolean;
 };
 
-export const PLAYER_SELECT_COLUMNS = 'id, display_name, height, weight, grad_year, position';
+export const PLAYER_SELECT_COLUMNS =
+  'id, display_name, height, weight, grad_year, position, stats_visible_to_team';
 
 // Joins whichever bio fields are actually set into one line — e.g.
 // "Point Guard · 6'2" · 165 lbs · Class of 2027". Skips anything blank
@@ -187,6 +189,7 @@ export type PlayerProfileUpdate = {
   weight: string | null;
   gradYear: number | null;
   position: string | null;
+  statsVisibleToTeam: boolean;
 };
 
 // Replaces the old narrower renamePlayer — same call site (AddPlayerScreen's
@@ -200,6 +203,7 @@ export async function updatePlayerProfile(playerId: string, update: PlayerProfil
       weight: update.weight,
       grad_year: update.gradYear,
       position: update.position,
+      stats_visible_to_team: update.statsVisibleToTeam,
     })
     .eq('id', playerId);
   if (error) throw error;

@@ -17,10 +17,13 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import RecordClipModal from '../components/RecordClipModal';
+import TeammatesModal from '../components/TeammatesModal';
+import WorkoutBuilderModal from '../components/WorkoutBuilderModal';
 import {
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
   deleteCompletion,
+  Drill,
   DrillResult,
   formatPlayerBio,
   getCompletionDates,
@@ -43,6 +46,13 @@ import {
   getTeammates,
   Teammate,
 } from '../lib/challenges';
+import {
+  getSuggestedDrillsForCategory,
+  listAllDrills,
+  listDrillCategories,
+  listWorkoutTemplates,
+  WorkoutTemplate,
+} from '../lib/workouts';
 
 type PlayerCardData = {
   player: Player;
@@ -52,7 +62,18 @@ type PlayerCardData = {
   completedToday: Map<string, DrillResult>;
   promptForResults: boolean;
   challenges: Challenge[];
+  categories: string[];
+  allDrills: Drill[];
+  workoutTemplates: WorkoutTemplate[];
 };
+
+// A Drill (from a category suggestion or a saved workout template) turned
+// into a WeeklyDrill-shaped row so it can reuse every existing mark-
+// done/record/schedule control below — those two sources never carry a
+// coach-set schedule, so both fields are just null.
+function asWeeklyDrill(drill: Drill): WeeklyDrill {
+  return { ...drill, scheduledTime: null, scheduledDurationMinutes: null };
+}
 
 // Only meaningful once a challenge is accepted (endsAt set) — pending
 // challenges never call this.
@@ -102,6 +123,39 @@ export default function HomeScreen() {
   const [creatingChallengeId, setCreatingChallengeId] = useState<string | null>(null);
   const [respondingId, setRespondingId] = useState<string | null>(null);
   const [recordingFor, setRecordingFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
+  const [builderForPlayerId, setBuilderForPlayerId] = useState<string | null>(null);
+  const [teammatesForPlayerId, setTeammatesForPlayerId] = useState<string | null>(null);
+  // Per-player "what to work on today" selection — null means the default
+  // list below (this week's assignments or the full library) shows as-is.
+  // A category or workout pick replaces it with a separate short "Suggested
+  // for you" list instead of filtering the default one down (a team
+  // assignment list can easily have zero drills in a picked category, and
+  // Jay's ask was "suggests 2-3 workouts in that area", not "filters what's
+  // already there").
+  const [activeSuggestion, setActiveSuggestion] = useState<
+    Record<string, { label: string; drills: Drill[] } | undefined>
+  >({});
+  const [loadingSuggestionFor, setLoadingSuggestionFor] = useState<string | null>(null);
+
+  const handlePickCategory = async (playerId: string, category: string) => {
+    setLoadingSuggestionFor(playerId);
+    try {
+      const suggested = await getSuggestedDrillsForCategory(playerId, category);
+      setActiveSuggestion((current) => ({ ...current, [playerId]: { label: category, drills: suggested } }));
+    } catch (e) {
+      Alert.alert('Could not load suggestions', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setLoadingSuggestionFor(null);
+    }
+  };
+
+  const handlePickWorkout = (playerId: string, template: WorkoutTemplate) => {
+    setActiveSuggestion((current) => ({ ...current, [playerId]: { label: template.name, drills: template.drills } }));
+  };
+
+  const clearSuggestion = (playerId: string) => {
+    setActiveSuggestion((current) => ({ ...current, [playerId]: undefined }));
+  };
 
   const load = useCallback(async () => {
     setError(null);
@@ -109,12 +163,24 @@ export default function HomeScreen() {
       const players = await listMyPlayers();
       const cardData = await Promise.all(
         players.map(async (player) => {
-          const [{ drills, source }, dates, completedToday, promptForResults, challenges] = await Promise.all([
+          const [
+            { drills, source },
+            dates,
+            completedToday,
+            promptForResults,
+            challenges,
+            categories,
+            allDrills,
+            workoutTemplates,
+          ] = await Promise.all([
             getWeeklyDrills(player.id),
             getCompletionDates(player.id),
             getTodayCompletions(player.id),
             getPromptForResultsForPlayer(player.id),
             getChallengesForPlayer(player.id),
+            listDrillCategories(player.id),
+            listAllDrills(player.id),
+            listWorkoutTemplates(player.id),
           ]);
           return {
             player,
@@ -124,6 +190,9 @@ export default function HomeScreen() {
             completedToday,
             promptForResults,
             challenges,
+            categories,
+            allDrills,
+            workoutTemplates,
           };
         })
       );
@@ -355,6 +424,85 @@ export default function HomeScreen() {
     }
   };
 
+  // Extracted so the same row (mark done, video, record, result, undo,
+  // schedule) renders identically whether it came from the normal
+  // assigned/library list or from a category/workout suggestion — those
+  // two sources are just a different set of drills feeding the exact same
+  // controls, not a different interaction.
+  const renderDrillRow = (
+    playerId: string,
+    drill: WeeklyDrill,
+    promptForResults: boolean,
+    completedToday: Map<string, DrillResult>
+  ) => {
+    const done = completedToday.has(drill.id);
+    const result = formatResult(completedToday.get(drill.id));
+    return (
+      <View key={drill.id} style={[styles.drillRow, done && styles.drillRowDone]}>
+        <Pressable
+          style={styles.drillRowMain}
+          onPress={() => handleMarkComplete(playerId, drill, promptForResults)}
+          disabled={markingId === drill.id || done}
+        >
+          <View style={styles.drillRowText}>
+            <Text style={styles.drillName}>{drill.name}</Text>
+            {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+          </View>
+          {markingId === drill.id ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : (
+            <Text style={done ? styles.checkDone : styles.checkPending}>
+              {done ? `✓ Done${result ? ` · ${result}` : ''}` : 'Mark done'}
+            </Text>
+          )}
+        </Pressable>
+        {drill.videoUrl ? (
+          <Pressable style={styles.iconButton} onPress={() => Linking.openURL(drill.videoUrl!)} hitSlop={8}>
+            <Text style={styles.iconButtonText}>▶️</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={styles.iconButton}
+          onPress={() => setRecordingFor({ playerId, drill })}
+          hitSlop={8}
+        >
+          <Text style={styles.iconButtonText}>🎥</Text>
+        </Pressable>
+        {done ? (
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => openResultLogger(playerId, drill, completedToday.get(drill.id))}
+            hitSlop={8}
+          >
+            <Text style={styles.iconButtonText}>📊</Text>
+          </Pressable>
+        ) : null}
+        {done ? (
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => handleUnmarkComplete(playerId, drill)}
+            disabled={markingId === drill.id}
+            hitSlop={8}
+          >
+            <Text style={styles.iconButtonText}>↩️</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={styles.iconButton}
+          onPress={() => openScheduler(drill)}
+          disabled={addingToCalendarId === drill.id}
+          hitSlop={8}
+        >
+          {addingToCalendarId === drill.id ? (
+            <ActivityIndicator color={colors.primary} size="small" />
+          ) : (
+            <Text style={styles.iconButtonText}>📅</Text>
+          )}
+        </Pressable>
+      </View>
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -387,9 +535,28 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       ) : (
-        cards.map(({ player, drills, source, streak, completedToday, promptForResults, challenges }) => (
+        cards.map(
+          ({
+            player,
+            drills,
+            source,
+            streak,
+            completedToday,
+            promptForResults,
+            challenges,
+            categories,
+            allDrills,
+            workoutTemplates,
+          }) => {
+            const suggestion = activeSuggestion[player.id];
+            return (
           <View key={player.id} style={styles.playerSection}>
-            <Text style={styles.playerName}>{player.display_name}</Text>
+            <View style={styles.playerNameRow}>
+              <Text style={styles.playerName}>{player.display_name}</Text>
+              <Pressable onPress={() => setTeammatesForPlayerId(player.id)} hitSlop={8}>
+                <Text style={styles.teammatesLink}>Teammates</Text>
+              </Pressable>
+            </View>
             {formatPlayerBio(player) ? (
               <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
             ) : null}
@@ -484,90 +651,67 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-            <Text style={styles.sectionTitle}>
-              {source === 'team' ? "This week's assigned drills" : 'Drill library'}
-            </Text>
+            <Text style={styles.sectionTitle}>What to work on today</Text>
+            <View style={styles.chipRow}>
+              <Pressable
+                style={[styles.chip, !suggestion && styles.chipSelected]}
+                onPress={() => clearSuggestion(player.id)}
+              >
+                <Text style={[styles.chipText, !suggestion && styles.chipTextSelected]}>All</Text>
+              </Pressable>
+              {categories.map((cat) => (
+                <Pressable
+                  key={cat}
+                  style={[styles.chip, suggestion?.label === cat && styles.chipSelected]}
+                  onPress={() => handlePickCategory(player.id, cat)}
+                  disabled={loadingSuggestionFor === player.id}
+                >
+                  <Text style={[styles.chipText, suggestion?.label === cat && styles.chipTextSelected]}>{cat}</Text>
+                </Pressable>
+              ))}
+              {workoutTemplates.map((t) => (
+                <Pressable
+                  key={t.id}
+                  style={[styles.chip, styles.chipWorkout, suggestion?.label === t.name && styles.chipSelected]}
+                  onPress={() => handlePickWorkout(player.id, t)}
+                >
+                  <Text style={[styles.chipText, suggestion?.label === t.name && styles.chipTextSelected]}>
+                    🏀 {t.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable onPress={() => setBuilderForPlayerId(player.id)} hitSlop={8}>
+              <Text style={styles.buildWorkoutLink}>+ Build a custom workout</Text>
+            </Pressable>
 
-            {drills.length === 0 ? (
-              <Text style={styles.placeholder}>No drills available yet.</Text>
+            {loadingSuggestionFor === player.id ? (
+              <ActivityIndicator color={colors.primary} style={{ marginVertical: 8 }} />
+            ) : suggestion ? (
+              <>
+                <Text style={styles.sectionTitle}>Suggested: {suggestion.label}</Text>
+                {suggestion.drills.length === 0 ? (
+                  <Text style={styles.placeholder}>No drills in this category yet.</Text>
+                ) : (
+                  suggestion.drills.map((d) => renderDrillRow(player.id, asWeeklyDrill(d), promptForResults, completedToday))
+                )}
+              </>
             ) : (
-              drills.map((drill) => {
-                const done = completedToday.has(drill.id);
-                const result = formatResult(completedToday.get(drill.id));
-                return (
-                  <View key={drill.id} style={[styles.drillRow, done && styles.drillRowDone]}>
-                    <Pressable
-                      style={styles.drillRowMain}
-                      onPress={() => handleMarkComplete(player.id, drill, promptForResults)}
-                      disabled={markingId === drill.id || done}
-                    >
-                      <View style={styles.drillRowText}>
-                        <Text style={styles.drillName}>{drill.name}</Text>
-                        {drill.category ? (
-                          <Text style={styles.drillCategory}>{drill.category}</Text>
-                        ) : null}
-                      </View>
-                      {markingId === drill.id ? (
-                        <ActivityIndicator color={colors.primary} />
-                      ) : (
-                        <Text style={done ? styles.checkDone : styles.checkPending}>
-                          {done ? `✓ Done${result ? ` · ${result}` : ''}` : 'Mark done'}
-                        </Text>
-                      )}
-                    </Pressable>
-                    {drill.videoUrl ? (
-                      <Pressable
-                        style={styles.iconButton}
-                        onPress={() => Linking.openURL(drill.videoUrl!)}
-                        hitSlop={8}
-                      >
-                        <Text style={styles.iconButtonText}>▶️</Text>
-                      </Pressable>
-                    ) : null}
-                    <Pressable
-                      style={styles.iconButton}
-                      onPress={() => setRecordingFor({ playerId: player.id, drill })}
-                      hitSlop={8}
-                    >
-                      <Text style={styles.iconButtonText}>🎥</Text>
-                    </Pressable>
-                    {done ? (
-                      <Pressable
-                        style={styles.iconButton}
-                        onPress={() => openResultLogger(player.id, drill, completedToday.get(drill.id))}
-                        hitSlop={8}
-                      >
-                        <Text style={styles.iconButtonText}>📊</Text>
-                      </Pressable>
-                    ) : null}
-                    {done ? (
-                      <Pressable
-                        style={styles.iconButton}
-                        onPress={() => handleUnmarkComplete(player.id, drill)}
-                        disabled={markingId === drill.id}
-                        hitSlop={8}
-                      >
-                        <Text style={styles.iconButtonText}>↩️</Text>
-                      </Pressable>
-                    ) : null}
-                    <Pressable
-                      style={styles.iconButton}
-                      onPress={() => openScheduler(drill)}
-                      disabled={addingToCalendarId === drill.id}
-                      hitSlop={8}
-                    >
-                      {addingToCalendarId === drill.id ? (
-                        <ActivityIndicator color={colors.primary} size="small" />
-                      ) : (
-                        <Text style={styles.iconButtonText}>📅</Text>
-                      )}
-                    </Pressable>
-                  </View>
-                );
-              })
+              <>
+                <Text style={styles.sectionTitle}>
+                  {source === 'team' ? "This week's assigned drills" : 'Drill library'}
+                </Text>
+                {drills.length === 0 ? (
+                  <Text style={styles.placeholder}>No drills available yet.</Text>
+                ) : (
+                  drills.map((drill) => renderDrillRow(player.id, drill, promptForResults, completedToday))
+                )}
+              </>
             )}
           </View>
-        ))
+            );
+          }
+        )
       )}
 
       <Modal
@@ -714,6 +858,17 @@ export default function HomeScreen() {
       onClose={() => setRecordingFor(null)}
       onSaved={handleRecordSaved}
     />
+    {teammatesForPlayerId ? (
+      <TeammatesModal playerId={teammatesForPlayerId} onClose={() => setTeammatesForPlayerId(null)} />
+    ) : null}
+    {builderForPlayerId ? (
+      <WorkoutBuilderModal
+        playerId={builderForPlayerId}
+        availableDrills={cards.find((c) => c.player.id === builderForPlayerId)?.allDrills ?? []}
+        onClose={() => setBuilderForPlayerId(null)}
+        onTemplatesChanged={load}
+      />
+    ) : null}
     </>
   );
 }
@@ -725,8 +880,24 @@ const styles = StyleSheet.create({
   error: { color: '#C4362B', fontSize: 13 },
   emptyState: { gap: 12 },
   playerSection: { gap: 10, marginBottom: 8 },
+  playerNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   playerName: { fontSize: 20, fontWeight: '700', color: colors.text },
+  teammatesLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   playerBio: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: -4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
+  },
+  chipWorkout: { borderColor: colors.accent },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 13, color: colors.text, fontWeight: '600' },
+  chipTextSelected: { color: '#FFFFFF' },
+  buildWorkoutLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   streakCard: {
     backgroundColor: colors.primary,
     borderRadius: 16,

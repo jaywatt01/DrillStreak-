@@ -48,7 +48,19 @@ create table players (
   -- they're managing) gets the Team Chat restriction Jay asked for —
   -- can read the team-wide feed, can only ever message the coach
   -- directly, never post to the group or DM another family.
-  is_account_holder boolean not null default false
+  is_account_holder boolean not null default false,
+  -- Added 2026-08-25, part of the teammate-profile-viewing build: an
+  -- opt-OUT (not opt-in) flag controlling whether this player's stats and
+  -- bio are visible to teammates browsing get_teammates() results, in
+  -- addition to their own owner/guardian and any coach. Defaults true —
+  -- the whole roster already sees each other in Team Board, so opt-in-only
+  -- would produce the same cold-start problem most opt-in comparison
+  -- features hit (almost nobody turns it on). Comparison/leaderboard
+  -- features stay opt-in per the ClassDojo design rules in DRILLSTREAK.md's
+  -- Growth strategy section, but this is closer to "more detail within an
+  -- existing relationship" than a new comparison surface — a family can
+  -- still flip it off per player.
+  stats_visible_to_team boolean not null default true
 );
 
 -- guardianships: lets a second account (e.g. the other parent) access a
@@ -444,6 +456,51 @@ create policy completions_coach_read on completions
     )
   );
 
+-- is_teammate_of: security-definer, same reason as is_player_owner_or_
+-- guardian/get_teammates above — team_memberships_access RLS only lets a
+-- caller read a membership row for a player they own/guard or coach, so an
+-- inline "do these two players share a team" check would silently see
+-- nothing for anyone but the coach. True if p_viewer_user_id owns/guards
+-- SOME player (other than p_player_id itself) that shares at least one
+-- team with p_player_id. Added 2026-08-25 for teammate profile/stats
+-- viewing — same underlying join as get_teammates, factored out since
+-- completions_teammate_read below needs the boolean, not the full list.
+create or replace function is_teammate_of(p_player_id uuid, p_viewer_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from team_memberships tm_target
+    join team_memberships tm_viewer on tm_viewer.team_id = tm_target.team_id
+    where tm_target.player_id = p_player_id
+      and tm_viewer.player_id <> p_player_id
+      and is_player_owner_or_guardian(tm_viewer.player_id, p_viewer_user_id)
+  );
+$$;
+
+revoke all on function is_teammate_of(uuid, uuid) from public;
+revoke all on function is_teammate_of(uuid, uuid) from anon;
+grant execute on function is_teammate_of(uuid, uuid) to authenticated;
+
+-- completions_teammate_read: lets a teammate (not the coach — that's
+-- completions_coach_read above) see another roster player's full
+-- completion history, gated by that player's own stats_visible_to_team
+-- opt-out flag. Deliberately NOT restricted to the current week the way
+-- completions_coach_read's paywall-bypass guard is — a season shooting %
+-- comparison needs more than one week of data, and this isn't a paywall
+-- bypass concern since it's a different player's data, not the viewer's
+-- own. The opt-out flag is the actual privacy control here.
+create policy completions_teammate_read on completions
+  for select
+  using (
+    exists (select 1 from players p where p.id = completions.player_id and p.stats_visible_to_team = true)
+    and is_teammate_of(completions.player_id, auth.uid())
+  );
+
 -- ---------------------------------------------------------------------------
 -- player_notes: a coach's own evolving note about a player on their roster
 -- (added 2026-08-14, part of the recruitment-layer build in DRILLSTREAK.md —
@@ -658,10 +715,30 @@ grant execute on function accept_challenge(uuid) to authenticated;
 -- results above — players_access RLS only lets a caller see a players row
 -- they own/guard or coach, so a player could never list *other* players on
 -- their own team to pick a challenge opponent from. Bypasses that
--- restriction for just id+display_name, re-verifying the caller actually
+-- restriction for id+display_name+bio, re-verifying the caller actually
 -- owns/guards p_player_id first.
+--
+-- Widened 2026-08-25 (teammate profile viewing): added the bio fields and
+-- stats_visible_to_team so a single call serves both the existing
+-- challenge-opponent picker AND a new teammate-profile list, instead of
+-- two near-duplicate queries. Deliberately still returns EVERY teammate
+-- regardless of stats_visible_to_team — challenging someone isn't the same
+-- as browsing their stats, so the challenge picker (already live) must
+-- keep seeing the full roster. The flag is returned so a profile-browsing
+-- screen can show "Private profile" for an opted-out teammate instead of
+-- hiding them outright; completions_teammate_read above is the actual
+-- enforcement, this flag is just what the UI reads to decide what to show.
 create or replace function get_teammates(p_player_id uuid)
-returns table(id uuid, display_name text, team_id uuid)
+returns table(
+  id uuid,
+  display_name text,
+  team_id uuid,
+  position text,
+  height text,
+  weight text,
+  grad_year integer,
+  stats_visible_to_team boolean
+)
 language sql
 security definer
 stable
@@ -671,7 +748,9 @@ as $$
   -- one row per teammate, not one per shared team; team_id picked
   -- deterministically (lowest uuid) since which shared roster gets
   -- recorded on the resulting challenge doesn't matter functionally.
-  select distinct on (p.id) p.id, p.display_name, tm_other.team_id
+  select distinct on (p.id)
+    p.id, p.display_name, tm_other.team_id,
+    p.position, p.height, p.weight, p.grad_year, p.stats_visible_to_team
   from players p
   join team_memberships tm_other on tm_other.player_id = p.id
   join team_memberships tm_self on tm_self.team_id = tm_other.team_id
@@ -684,6 +763,46 @@ $$;
 revoke all on function get_teammates(uuid) from public;
 revoke all on function get_teammates(uuid) from anon;
 grant execute on function get_teammates(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- workout_templates: a player's own saved custom workout (an ordered set of
+-- drills they build once and reuse) — added 2026-08-25. Same ownership
+-- shape as custom drills: scoped to one player, editable by whoever
+-- owns/guards that player.
+-- ---------------------------------------------------------------------------
+create table workout_templates (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+create table workout_template_drills (
+  id uuid primary key default gen_random_uuid(),
+  template_id uuid not null references workout_templates(id) on delete cascade,
+  drill_id uuid not null references drills(id),
+  sort_order integer not null default 0
+);
+
+alter table workout_templates enable row level security;
+alter table workout_template_drills enable row level security;
+
+create policy workout_templates_access on workout_templates
+  for all
+  using (is_player_owner_or_guardian(workout_templates.player_id, auth.uid()));
+
+-- Joins back to workout_templates rather than embedding its own
+-- player_id — one ownership check to maintain, not two copies of the same
+-- rule that could drift out of sync.
+create policy workout_template_drills_access on workout_template_drills
+  for all
+  using (
+    exists (
+      select 1 from workout_templates wt
+      where wt.id = workout_template_drills.template_id
+        and is_player_owner_or_guardian(wt.player_id, auth.uid())
+    )
+  );
 
 -- get_player_challenges: security-definer for the same reason as
 -- get_teammates — rendering a challenge needs the OTHER player's display
@@ -2331,5 +2450,111 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --     and (
 --       not is_player_restricted(team_messages.team_id, auth.uid())
 --       or is_team_coach(team_messages.team_id, recipient_user_id)
+--     )
+--   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — Phase 1 of
+-- the feature batch from tonight's brainstorm (badges/streak-grace/
+-- offseason are Phases 2-3, separate migrations later): teammate profile
+-- viewing (opt-out flag + RLS + widened get_teammates) and the custom
+-- workout builder (workout_templates + workout_template_drills). Run
+-- against the live project — every statement is idempotent, safe even if
+-- part of this was already applied.
+-- ---------------------------------------------------------------------------
+-- alter table players add column if not exists stats_visible_to_team boolean not null default true;
+--
+-- create or replace function is_teammate_of(p_player_id uuid, p_viewer_user_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select exists (
+--     select 1
+--     from team_memberships tm_target
+--     join team_memberships tm_viewer on tm_viewer.team_id = tm_target.team_id
+--     where tm_target.player_id = p_player_id
+--       and tm_viewer.player_id <> p_player_id
+--       and is_player_owner_or_guardian(tm_viewer.player_id, p_viewer_user_id)
+--   );
+-- $$;
+--
+-- revoke all on function is_teammate_of(uuid, uuid) from public;
+-- revoke all on function is_teammate_of(uuid, uuid) from anon;
+-- grant execute on function is_teammate_of(uuid, uuid) to authenticated;
+--
+-- drop policy if exists completions_teammate_read on completions;
+-- create policy completions_teammate_read on completions
+--   for select
+--   using (
+--     exists (select 1 from players p where p.id = completions.player_id and p.stats_visible_to_team = true)
+--     and is_teammate_of(completions.player_id, auth.uid())
+--   );
+--
+-- drop function if exists get_teammates(uuid);
+-- create or replace function get_teammates(p_player_id uuid)
+-- returns table(
+--   id uuid,
+--   display_name text,
+--   team_id uuid,
+--   position text,
+--   height text,
+--   weight text,
+--   grad_year integer,
+--   stats_visible_to_team boolean
+-- )
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select distinct on (p.id)
+--     p.id, p.display_name, tm_other.team_id,
+--     p.position, p.height, p.weight, p.grad_year, p.stats_visible_to_team
+--   from players p
+--   join team_memberships tm_other on tm_other.player_id = p.id
+--   join team_memberships tm_self on tm_self.team_id = tm_other.team_id
+--   where tm_self.player_id = p_player_id
+--     and p.id <> p_player_id
+--     and is_player_owner_or_guardian(p_player_id, auth.uid())
+--   order by p.id, tm_other.team_id;
+-- $$;
+--
+-- revoke all on function get_teammates(uuid) from public;
+-- revoke all on function get_teammates(uuid) from anon;
+-- grant execute on function get_teammates(uuid) to authenticated;
+--
+-- create table if not exists workout_templates (
+--   id uuid primary key default gen_random_uuid(),
+--   player_id uuid not null references players(id) on delete cascade,
+--   name text not null,
+--   created_at timestamptz not null default now()
+-- );
+--
+-- create table if not exists workout_template_drills (
+--   id uuid primary key default gen_random_uuid(),
+--   template_id uuid not null references workout_templates(id) on delete cascade,
+--   drill_id uuid not null references drills(id),
+--   sort_order integer not null default 0
+-- );
+--
+-- alter table workout_templates enable row level security;
+-- alter table workout_template_drills enable row level security;
+--
+-- drop policy if exists workout_templates_access on workout_templates;
+-- create policy workout_templates_access on workout_templates
+--   for all
+--   using (is_player_owner_or_guardian(workout_templates.player_id, auth.uid()));
+--
+-- drop policy if exists workout_template_drills_access on workout_template_drills;
+-- create policy workout_template_drills_access on workout_template_drills
+--   for all
+--   using (
+--     exists (
+--       select 1 from workout_templates wt
+--       where wt.id = workout_template_drills.template_id
+--         and is_player_owner_or_guardian(wt.player_id, auth.uid())
 --     )
 --   );

@@ -6,6 +6,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -51,6 +52,7 @@ export default function AddPlayerScreen() {
   const [editWeight, setEditWeight] = useState('');
   const [editGradYear, setEditGradYear] = useState('');
   const [editPosition, setEditPosition] = useState('');
+  const [editStatsVisible, setEditStatsVisible] = useState(true);
   const [savingPlayerEdit, setSavingPlayerEdit] = useState(false);
 
   const [inviteCode, setInviteCode] = useState('');
@@ -155,6 +157,7 @@ export default function AddPlayerScreen() {
           setEditWeight(player.weight ?? '');
           setEditGradYear(player.grad_year != null ? String(player.grad_year) : '');
           setEditPosition(player.position ?? '');
+          setEditStatsVisible(player.stats_visible_to_team);
         },
       },
       {
@@ -198,6 +201,7 @@ export default function AddPlayerScreen() {
         weight: editWeight.trim() || null,
         gradYear: editGradYear.trim() && Number.isFinite(parsedGradYear) ? parsedGradYear : null,
         position: editPosition.trim() || null,
+        statsVisibleToTeam: editStatsVisible,
       });
       setRenamingPlayerId(null);
       await load();
@@ -398,6 +402,16 @@ export default function AddPlayerScreen() {
             placeholderTextColor={colors.textMuted}
             keyboardType="number-pad"
           />
+          <View style={styles.visibilityRow}>
+            <View style={styles.visibilityText}>
+              <Text style={styles.visibilityLabel}>Visible to teammates</Text>
+              <Text style={styles.editRowLabel}>
+                Lets teammates on the same team see this stats/bio, same as a coach already can.
+                Off keeps it private — only you and the coach see it.
+              </Text>
+            </View>
+            <Switch value={editStatsVisible} onValueChange={setEditStatsVisible} trackColor={{ true: colors.primary }} />
+          </View>
           <View style={styles.editButtonRow}>
             <Pressable
               style={[styles.smallButton, styles.smallButtonSecondary]}
@@ -669,6 +683,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8EA',
   },
   editRowLabel: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  visibilityRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  visibilityText: { flex: 1, gap: 2 },
+  visibilityLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
   editButtonRow: { flexDirection: 'row', gap: 8 },
   smallButton: {
     flex: 1,
