@@ -377,19 +377,29 @@ export async function getWeeklyDrills(
   };
 }
 
-export type CompletionHistoryDrill = { name: string; makes: number | null; attempts: number | null };
+export type CompletionHistoryDrill = {
+  name: string;
+  category: string | null;
+  makes: number | null;
+  attempts: number | null;
+};
 export type CompletionHistoryEntry = { date: string; drills: CompletionHistoryDrill[] };
 
 // Full logged history for a player, most recent day first, each day's
 // drills grouped together. Gating (current-week-only for free users) is
 // the caller's responsibility — this always returns everything so the
 // caller can also tell whether there's more history a paywall would unlock.
-export async function getCompletionHistory(playerId: string): Promise<CompletionHistoryEntry[]> {
-  const { data, error } = await supabase
+// `seasonId` is optional and additive (Phase 3) — omit it for the exact
+// same all-time behavior this always had; pass it to scope to one
+// labeled season (e.g. Season History on Progress, reading a past season
+// closed by seasons.ts).
+export async function getCompletionHistory(playerId: string, seasonId?: string): Promise<CompletionHistoryEntry[]> {
+  let query = supabase
     .from('completions')
-    .select('date, makes, attempts, drills(name)')
-    .eq('player_id', playerId)
-    .order('date', { ascending: false });
+    .select('date, makes, attempts, drills(name, category)')
+    .eq('player_id', playerId);
+  if (seasonId) query = query.eq('season_id', seasonId);
+  const { data, error } = await query.order('date', { ascending: false });
   if (error) throw error;
 
   const byDate = new Map<string, CompletionHistoryDrill[]>();
@@ -400,6 +410,7 @@ export async function getCompletionHistory(playerId: string): Promise<Completion
     const existing = byDate.get(date) ?? [];
     existing.push({
       name: drill.name as string,
+      category: drill.category as string | null,
       makes: row.makes as number | null,
       attempts: row.attempts as number | null,
     });
@@ -408,12 +419,15 @@ export async function getCompletionHistory(playerId: string): Promise<Completion
   return Array.from(byDate.entries()).map(([date, drills]) => ({ date, drills }));
 }
 
-export async function getCompletionDates(playerId: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('completions')
-    .select('date')
-    .eq('player_id', playerId)
-    .order('date', { ascending: false });
+// `seasonId` is optional and additive (Phase 3) — see getCompletionHistory
+// above for the same reasoning. Passed by Home/Progress/CoachPlayerStatsModal
+// once a player has an active season, so "current streak" resets at a
+// season boundary instead of running all-time forever — the fresh-start
+// feeling Jay wanted, without touching a single row of the underlying data.
+export async function getCompletionDates(playerId: string, seasonId?: string): Promise<string[]> {
+  let query = supabase.from('completions').select('date').eq('player_id', playerId);
+  if (seasonId) query = query.eq('season_id', seasonId);
+  const { data, error } = await query.order('date', { ascending: false });
   if (error) throw error;
   return Array.from(new Set((data ?? []).map((c) => c.date as string)));
 }

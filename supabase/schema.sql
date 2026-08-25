@@ -922,6 +922,77 @@ create policy badges_teammate_read on badges
   );
 
 -- ---------------------------------------------------------------------------
+-- seasons: Phase 3, added 2026-08-25. A labeled date range wrapper around
+-- a player's completions — "archive" means segment and label, never
+-- delete or reset (see DRILLSTREAK.md's Phase 3 scoping note for the full
+-- reasoning tying this to the existing multi-year recruitment-layer
+-- commitment). At most one row per player has ended_at null at a time
+-- (the active season) — enforced by the partial unique index below, not
+-- just app discipline. Toggling In Season <-> Offseason always closes the
+-- current active row (if any) and opens a new one with the opposite
+-- is_offseason value; nothing about a closed season's data ever moves or
+-- gets deleted, only completions.season_id (below) stops pointing at it
+-- for new activity going forward.
+-- ---------------------------------------------------------------------------
+create table seasons (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  label text not null,
+  is_offseason boolean not null default false,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz
+);
+
+create unique index seasons_one_active_per_player on seasons (player_id) where ended_at is null;
+
+alter table seasons enable row level security;
+
+create policy seasons_owner_access on seasons
+  for all
+  using (is_player_owner_or_guardian(seasons.player_id, auth.uid()));
+
+-- A coach toggling the whole roster's season needs write access to every
+-- roster player's seasons row, not just their own kid's — same
+-- coach-controls-team-state shape as prompt_for_results/assignments
+-- elsewhere in this schema, not a new trust model.
+create policy seasons_coach_access on seasons
+  for all
+  using (
+    exists (
+      select 1 from team_memberships tm
+      join teams t on t.id = tm.team_id
+      where tm.player_id = seasons.player_id and t.coach_user_id = auth.uid()
+    )
+  );
+
+-- Tags every new completion with whichever season is active for that
+-- player at the moment it's logged — completions never gets a season_id
+-- set by the client (see logCompletion in lib/players.ts, unchanged), this
+-- trigger is the only thing that ever writes it. No security definer
+-- needed: completions are only ever inserted by a player's own
+-- owner/guardian (never a coach), and that same account already has
+-- direct RLS read access to that player's seasons rows via
+-- seasons_owner_access above, so the trigger runs fine with the caller's
+-- own normal privileges. Stays null (career/unsegmented bucket) if the
+-- player has never toggled a season — deliberately not backfilled for
+-- existing history, per the Phase 3 scoping note.
+alter table completions add column season_id uuid references seasons(id) on delete set null;
+
+create or replace function set_completion_season()
+returns trigger
+language plpgsql
+as $$
+begin
+  select id into new.season_id from seasons where player_id = new.player_id and ended_at is null limit 1;
+  return new;
+end;
+$$;
+
+create trigger completions_set_season
+before insert on completions
+for each row execute function set_completion_season();
+
+-- ---------------------------------------------------------------------------
 -- is_on_team: security-definer helper for the Team Board build below (added
 -- 2026-08-24). Same reason as is_player_owner_or_guardian/player_has_prompt_
 -- for_results above — teams_coach_access restricts SELECT on `teams` to the
@@ -2698,3 +2769,55 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --     and (recipient_user_id is null or auth.uid() in (author_user_id, recipient_user_id))
 --     and (expires_at is null or expires_at > now())
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — Phase 3:
+-- seasons (offseason toggle, weekly-goal mode, season archiving). Run
+-- against the live project — every statement is idempotent, safe even if
+-- part of this was already applied.
+-- ---------------------------------------------------------------------------
+-- create table if not exists seasons (
+--   id uuid primary key default gen_random_uuid(),
+--   player_id uuid not null references players(id) on delete cascade,
+--   label text not null,
+--   is_offseason boolean not null default false,
+--   started_at timestamptz not null default now(),
+--   ended_at timestamptz
+-- );
+--
+-- create unique index if not exists seasons_one_active_per_player on seasons (player_id) where ended_at is null;
+--
+-- alter table seasons enable row level security;
+--
+-- drop policy if exists seasons_owner_access on seasons;
+-- create policy seasons_owner_access on seasons
+--   for all
+--   using (is_player_owner_or_guardian(seasons.player_id, auth.uid()));
+--
+-- drop policy if exists seasons_coach_access on seasons;
+-- create policy seasons_coach_access on seasons
+--   for all
+--   using (
+--     exists (
+--       select 1 from team_memberships tm
+--       join teams t on t.id = tm.team_id
+--       where tm.player_id = seasons.player_id and t.coach_user_id = auth.uid()
+--     )
+--   );
+--
+-- alter table completions add column if not exists season_id uuid references seasons(id) on delete set null;
+--
+-- create or replace function set_completion_season()
+-- returns trigger
+-- language plpgsql
+-- as $$
+-- begin
+--   select id into new.season_id from seasons where player_id = new.player_id and ended_at is null limit 1;
+--   return new;
+-- end;
+-- $$;
+--
+-- drop trigger if exists completions_set_season on completions;
+-- create trigger completions_set_season
+-- before insert on completions
+-- for each row execute function set_completion_season();

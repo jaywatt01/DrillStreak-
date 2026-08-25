@@ -11,6 +11,7 @@ import {
   computeRepTallies,
   computeShootingBreakdown,
   formatPlayerBio,
+  getCompletionDates,
   getCompletionHistory,
   getPlayerNotes,
   isFreeThrowDrill,
@@ -22,6 +23,7 @@ import {
   ShootingComposite,
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
+import { getActiveSeason, listSeasonHistory, Season, SeasonSummary, summarizeSeason } from '../lib/seasons';
 
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
@@ -33,6 +35,7 @@ const CALENDAR_WEEKS_FREE = 1;
 type PlayerProgress = {
   player: Player;
   streak: number;
+  activeSeason: Season | null;
   visibleHistory: CompletionHistoryEntry[];
   hasMoreHistory: boolean;
   allDates: string[];
@@ -40,6 +43,7 @@ type PlayerProgress = {
   freeThrows: ShootingComposite | null;
   shooting: ShootingComposite | null;
   repTallies: RepTally[];
+  pastSeasons: Season[];
 };
 
 export default function ProgressScreen() {
@@ -50,6 +54,8 @@ export default function ProgressScreen() {
   const [progress, setProgress] = useState<PlayerProgress[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<{ title: string; entries: ShootingBreakdownEntry[] } | null>(null);
+  const [seasonDetail, setSeasonDetail] = useState<{ season: Season; summary: SeasonSummary } | null>(null);
+  const [loadingSeasonDetail, setLoadingSeasonDetail] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -58,15 +64,24 @@ export default function ProgressScreen() {
       const weekStart = mondayOfThisWeek();
       const data = await Promise.all(
         players.map(async (player) => {
-          const [history, notes] = await Promise.all([
+          const [history, notes, pastSeasons, activeSeason] = await Promise.all([
             getCompletionHistory(player.id),
             getPlayerNotes(player.id),
+            listSeasonHistory(player.id),
+            getActiveSeason(player.id),
           ]);
           const dates = history.map((h) => h.date);
+          // Current streak scopes to the active season, same as Home and
+          // the coach stats modal — calendar/shooting/rep totals below
+          // stay all-time on purpose (the career numbers Horizon 2's
+          // recruiting-layer commitment depends on), this is the one
+          // number that resets at a season boundary.
+          const streakDates = activeSeason ? await getCompletionDates(player.id, activeSeason.id) : dates;
           const visibleHistory = hasParentTier ? history : history.filter((h) => h.date >= weekStart);
           return {
             player,
-            streak: calculateStreak(dates),
+            streak: calculateStreak(streakDates),
+            activeSeason,
             visibleHistory,
             hasMoreHistory: !hasParentTier && history.length > visibleHistory.length,
             allDates: dates,
@@ -74,6 +89,7 @@ export default function ProgressScreen() {
             freeThrows: computeMakesAttemptsTotal(visibleHistory, isFreeThrowDrill),
             shooting: computeMakesAttemptsTotal(visibleHistory, (name) => !isFreeThrowDrill(name)),
             repTallies: computeRepTallies(visibleHistory),
+            pastSeasons,
           };
         })
       );
@@ -105,6 +121,18 @@ export default function ProgressScreen() {
     setBreakdown({ title, entries: computeShootingBreakdown(history, matches) });
   };
 
+  const openSeasonDetail = async (playerId: string, season: Season) => {
+    setLoadingSeasonDetail(season.id);
+    try {
+      const summary = await summarizeSeason(playerId, season.id);
+      setSeasonDetail({ season, summary });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load season detail.');
+    } finally {
+      setLoadingSeasonDetail(null);
+    }
+  };
+
   if (loading || entitlementLoading) {
     return (
       <View style={styles.centered}>
@@ -125,14 +153,16 @@ export default function ProgressScreen() {
       {progress.length === 0 ? (
         <Text style={styles.placeholder}>No players yet — add one from the Add a Player tab.</Text>
       ) : (
-        progress.map(({ player, streak, visibleHistory, hasMoreHistory, allDates, notes, freeThrows, shooting, repTallies }) => (
+        progress.map(({ player, streak, activeSeason, visibleHistory, hasMoreHistory, allDates, notes, freeThrows, shooting, repTallies, pastSeasons }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
             {formatPlayerBio(player) ? (
               <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
             ) : null}
             <View style={styles.streakCard}>
-              <Text style={styles.streakLabel}>Current streak</Text>
+              <Text style={styles.streakLabel}>
+                Current streak{activeSeason ? ` · ${activeSeason.label}` : ''}
+              </Text>
               <Text style={styles.streakValue}>
                 {streak} {streak === 1 ? 'day' : 'days'}
               </Text>
@@ -204,6 +234,27 @@ export default function ProgressScreen() {
                     <Text style={styles.noteLabel}>Coach's note</Text>
                     <Text style={styles.noteText}>{n.note}</Text>
                   </View>
+                ))}
+              </View>
+            ) : null}
+
+            {pastSeasons.length > 0 ? (
+              <View style={styles.seasonHistorySection}>
+                <Text style={styles.historyLabel}>Season History</Text>
+                {pastSeasons.map((s) => (
+                  <Pressable
+                    key={s.id}
+                    style={styles.seasonRow}
+                    onPress={() => openSeasonDetail(player.id, s)}
+                    disabled={loadingSeasonDetail === s.id}
+                  >
+                    <Text style={styles.seasonRowLabel}>{s.label}</Text>
+                    {loadingSeasonDetail === s.id ? (
+                      <ActivityIndicator color={colors.primary} size="small" />
+                    ) : (
+                      <Text style={styles.seasonRowLink}>View →</Text>
+                    )}
+                  </Pressable>
                 ))}
               </View>
             ) : null}
@@ -283,6 +334,62 @@ export default function ProgressScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={seasonDetail != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSeasonDetail(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{seasonDetail?.season.label}</Text>
+            {seasonDetail ? (
+              <View style={{ gap: 10 }}>
+                <View style={styles.streakCard}>
+                  <Text style={styles.streakLabel}>Best streak that season</Text>
+                  <Text style={styles.streakValue}>
+                    {seasonDetail.summary.bestStreak} {seasonDetail.summary.bestStreak === 1 ? 'day' : 'days'}
+                  </Text>
+                </View>
+                {seasonDetail.summary.freeThrows ? (
+                  <View style={styles.shootingCard}>
+                    <Text style={styles.streakLabel}>Free Throws</Text>
+                    <View style={styles.shootingRow}>
+                      <Text style={styles.streakValue}>
+                        {seasonDetail.summary.freeThrows.makes}/{seasonDetail.summary.freeThrows.attempts}
+                      </Text>
+                      <Text style={styles.shootingPercent}>
+                        {Math.round(
+                          (seasonDetail.summary.freeThrows.makes / seasonDetail.summary.freeThrows.attempts) * 100
+                        )}
+                        %
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+                {seasonDetail.summary.shooting ? (
+                  <View style={styles.shootingCard}>
+                    <Text style={styles.streakLabel}>Shooting</Text>
+                    <View style={styles.shootingRow}>
+                      <Text style={styles.streakValue}>
+                        {seasonDetail.summary.shooting.makes}/{seasonDetail.summary.shooting.attempts}
+                      </Text>
+                      <Text style={styles.shootingPercent}>
+                        {Math.round((seasonDetail.summary.shooting.makes / seasonDetail.summary.shooting.attempts) * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+                <Text style={styles.placeholder}>Total reps logged: {seasonDetail.summary.totalReps}</Text>
+              </View>
+            ) : null}
+            <Pressable style={styles.smallButton} onPress={() => setSeasonDetail(null)}>
+              <Text style={styles.smallButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -335,6 +442,20 @@ const styles = StyleSheet.create({
   noteLabel: { fontSize: 12, fontWeight: '700', color: colors.accentDark },
   noteText: { fontSize: 14, color: colors.text, lineHeight: 20, marginTop: 2 },
   historyLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 4 },
+  seasonHistorySection: { gap: 6 },
+  seasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+  },
+  seasonRowLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
+  seasonRowLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   historyRow: {
     borderWidth: 1,
     borderColor: colors.border,

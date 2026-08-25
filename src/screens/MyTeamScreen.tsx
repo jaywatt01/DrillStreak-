@@ -43,6 +43,7 @@ import {
   unassignDrill,
   updateAssignmentSchedule,
 } from '../lib/team';
+import { startInSeason, startOffseason } from '../lib/seasons';
 
 // "HH:MM:SS" (Postgres `time`) <-> a plain Date used just to drive the
 // picker UI. Only the hour/minute round-trip through the database.
@@ -242,6 +243,42 @@ export default function MyTeamScreen() {
       setTeam({ ...team, prompt_for_results: !value }); // revert on failure
       setError(e instanceof Error ? e.message : 'Failed to update setting.');
     }
+  };
+
+  const [switchingSeason, setSwitchingSeason] = useState(false);
+
+  // Bulk-applies to every roster player at once, not a single team-level
+  // flag — seasons are per-player (see schema.sql), so "switch the team's
+  // season" really means looping the same per-player switch over the
+  // whole roster. Deliberately worded to reassure, not warn: nothing gets
+  // deleted, every player's stats stay saved and viewable under their own
+  // season label afterward — see DRILLSTREAK.md's Phase 3 scoping note for
+  // why this had to NOT sound like a delete confirmation.
+  const handleSwitchTeamSeason = (toOffseason: boolean) => {
+    if (roster.length === 0) return;
+    Alert.alert(
+      toOffseason ? 'Start offseason for the whole team?' : 'Start a new season for the whole team?',
+      "Every player's stats stay saved — nobody's history is deleted, you can look back at any past season anytime from Progress.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: toOffseason ? 'Start Offseason' : 'Start New Season',
+          onPress: async () => {
+            setSwitchingSeason(true);
+            setError(null);
+            try {
+              const action = toOffseason ? startOffseason : startInSeason;
+              await Promise.all(roster.map((p) => action(p.id)));
+              Alert.alert('Done', toOffseason ? 'Offseason started for the whole team.' : 'New season started for the whole team.');
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Failed to switch season for one or more players.');
+            } finally {
+              setSwitchingSeason(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const openNoteEditor = async (player: RosterPlayer) => {
@@ -466,6 +503,35 @@ export default function MyTeamScreen() {
               onValueChange={handleTogglePromptForResults}
               trackColor={{ true: colors.primary }}
             />
+          </View>
+
+          <View style={styles.seasonCard}>
+            <Text style={styles.settingLabel}>Season</Text>
+            <Text style={styles.settingBody}>
+              Switches the whole roster between in-season (daily streak) and offseason (weekly
+              goals, a personalized focus suggestion). Nothing is ever deleted — every past season
+              stays viewable.
+            </Text>
+            <View style={styles.seasonButtonRow}>
+              <Pressable
+                style={[styles.seasonButton, switchingSeason && styles.buttonDisabled]}
+                onPress={() => handleSwitchTeamSeason(true)}
+                disabled={switchingSeason || roster.length === 0}
+              >
+                <Text style={styles.seasonButtonText}>Start Offseason</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.seasonButton, styles.seasonButtonSecondary, switchingSeason && styles.buttonDisabled]}
+                onPress={() => handleSwitchTeamSeason(false)}
+                disabled={switchingSeason || roster.length === 0}
+              >
+                {switchingSeason ? (
+                  <ActivityIndicator color={colors.primary} size="small" />
+                ) : (
+                  <Text style={styles.seasonButtonSecondaryText}>Start New Season</Text>
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <Text style={styles.sectionTitle}>Roster ({roster.length})</Text>
@@ -756,6 +822,25 @@ const styles = StyleSheet.create({
   settingText: { flex: 1, gap: 2 },
   settingLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
   settingBody: { fontSize: 12, color: colors.textMuted, lineHeight: 16 },
+  seasonCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: colors.surface,
+    gap: 6,
+  },
+  seasonButtonRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  seasonButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  seasonButtonSecondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
+  seasonButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  seasonButtonSecondaryText: { color: colors.text, fontSize: 13, fontWeight: '600' },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginTop: 8 },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   input: {
