@@ -15,6 +15,9 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
 import { listMyTeams, listTeamContacts } from '../lib/teamMessages';
+import { listMyPlayers, Player } from '../lib/players';
+import { listBadges, Badge } from '../lib/badges';
+import BadgeLegend from '../components/BadgeLegend';
 import {
   isPurchasesConfigured,
   purchaseParentTier,
@@ -30,12 +33,24 @@ export default function AccountScreen() {
   const [displayName, setDisplayName] = useState('');
   const [loadingName, setLoadingName] = useState(true);
   const [savingName, setSavingName] = useState(false);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [badgesByPlayer, setBadgesByPlayer] = useState<Record<string, Badge[]>>({});
+  const [loadingBadges, setLoadingBadges] = useState(true);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
     getMyDisplayName()
       .then((name) => setDisplayName(name ?? ''))
       .finally(() => setLoadingName(false));
+    listMyPlayers()
+      .then(async (myPlayers) => {
+        setPlayers(myPlayers);
+        const entries = await Promise.all(
+          myPlayers.map(async (p) => [p.id, await listBadges(p.id)] as const)
+        );
+        setBadgesByPlayer(Object.fromEntries(entries));
+      })
+      .finally(() => setLoadingBadges(false));
   }, []);
 
   // Soft check, not a hard gate: a display_name is one value per account,
@@ -154,6 +169,22 @@ export default function AccountScreen() {
           </>
         )}
       </View>
+
+      {players.length > 0 ? (
+        <View style={styles.badgesSection}>
+          <Text style={styles.tierLabel}>Badges</Text>
+          {loadingBadges ? (
+            <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
+          ) : (
+            players.map((p) => (
+              <View key={p.id} style={styles.badgesPlayerBlock}>
+                {players.length > 1 ? <Text style={styles.badgesPlayerName}>{p.display_name}</Text> : null}
+                <BadgeLegend earnedBadges={badgesByPlayer[p.id] ?? []} />
+              </View>
+            ))
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.tierCard}>
         <Text style={styles.tierLabel}>Coach</Text>
@@ -275,6 +306,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     marginTop: 8,
   },
+  badgesSection: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+    gap: 10,
+    backgroundColor: colors.surface,
+  },
+  badgesPlayerBlock: { gap: 8 },
+  badgesPlayerName: { fontSize: 14, fontWeight: '700', color: colors.text },
   tierCardActive: {
     borderColor: colors.accent,
     backgroundColor: '#FFF8EA',

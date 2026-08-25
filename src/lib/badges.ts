@@ -1,6 +1,12 @@
 import { supabase } from './supabase';
 
-export type BadgeType = 'streak_7' | 'streak_30' | 'streak_100' | 'challenge_won' | 'offseason_completed';
+export type BadgeType =
+  | 'streak_7'
+  | 'streak_30'
+  | 'streak_60'
+  | 'streak_100'
+  | 'challenge_won'
+  | 'offseason_completed';
 
 export type Badge = {
   id: string;
@@ -9,8 +15,12 @@ export type Badge = {
   earnedAt: string;
 };
 
+// Added 2026-08-25 (streak_60): a real gap Jay caught — 30 to 100 is a
+// big jump with nothing in between to reward, a halfway-point milestone
+// so a player still gets something before the big one.
 const STREAK_MILESTONES: { threshold: number; type: BadgeType }[] = [
   { threshold: 100, type: 'streak_100' },
+  { threshold: 60, type: 'streak_60' },
   { threshold: 30, type: 'streak_30' },
   { threshold: 7, type: 'streak_7' },
 ];
@@ -18,10 +28,46 @@ const STREAK_MILESTONES: { threshold: number; type: BadgeType }[] = [
 export const BADGE_LABELS: Record<BadgeType, string> = {
   streak_7: '7-day streak',
   streak_30: '30-day streak',
+  streak_60: '60-day streak',
   streak_100: '100-day streak',
   challenge_won: 'Challenge won',
   offseason_completed: 'Offseason completed',
 };
+
+// One unique, non-overlapping emoji per badge — the streak series
+// deliberately escalates (spark -> bolt -> star -> crown) so the four
+// milestones read as a visible progression, not four random icons. The
+// two "event" badges (challenge_won, offseason_completed) get icons that
+// don't visually collide with the streak series or each other.
+export const BADGE_ICONS: Record<BadgeType, string> = {
+  streak_7: '🔥',
+  streak_30: '⚡',
+  streak_60: '🌟',
+  streak_100: '👑',
+  challenge_won: '🏆',
+  offseason_completed: '🏀',
+};
+
+export const BADGE_HOW_TO_EARN: Record<BadgeType, string> = {
+  streak_7: 'Log a drill 7 days in a row.',
+  streak_30: 'Log a drill 30 days in a row.',
+  streak_60: 'Log a drill 60 days in a row.',
+  streak_100: 'Log a drill 100 days in a row.',
+  challenge_won: 'Win a head-to-head Challenge a Friend. Earn one every time you win.',
+  offseason_completed: 'Log at least one drill during an offseason, then switch back to in-season.',
+};
+
+// Fixed display order for the legend/catalog — not the same as object key
+// order (not guaranteed), and not earned-date order (that's listBadges'
+// job). Streak progression first, then the two event badges.
+export const BADGE_CATALOG_ORDER: BadgeType[] = [
+  'streak_7',
+  'streak_30',
+  'streak_60',
+  'streak_100',
+  'challenge_won',
+  'offseason_completed',
+];
 
 function mapBadgeRow(row: { id: string; type: string; challenge_id: string | null; earned_at: string }): Badge {
   return { id: row.id, type: row.type as BadgeType, challengeId: row.challenge_id, earnedAt: row.earned_at };
