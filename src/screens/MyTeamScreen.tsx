@@ -246,6 +246,10 @@ export default function MyTeamScreen() {
   };
 
   const [switchingSeason, setSwitchingSeason] = useState(false);
+  // Shared label typed once, applied to every roster player's new season —
+  // real gap Jay caught: the backend always took a custom label, nothing
+  // in this screen ever let a coach type one before switching.
+  const [teamSeasonLabel, setTeamSeasonLabel] = useState('');
 
   // Bulk-applies to every roster player at once, not a single team-level
   // flag — seasons are per-player (see schema.sql), so "switch the team's
@@ -268,7 +272,8 @@ export default function MyTeamScreen() {
             setError(null);
             try {
               const action = toOffseason ? startOffseason : startInSeason;
-              await Promise.all(roster.map((p) => action(p.id)));
+              await Promise.all(roster.map((p) => action(p.id, teamSeasonLabel)));
+              setTeamSeasonLabel('');
               Alert.alert('Done', toOffseason ? 'Offseason started for the whole team.' : 'New season started for the whole team.');
             } catch (e) {
               setError(e instanceof Error ? e.message : 'Failed to switch season for one or more players.');
@@ -510,8 +515,16 @@ export default function MyTeamScreen() {
             <Text style={styles.settingBody}>
               Switches the whole roster between in-season (daily streak) and offseason (weekly
               goals, a personalized focus suggestion). Nothing is ever deleted — every past season
-              stays viewable.
+              stays viewable. Every player's own season can still be renamed individually from
+              their own Add a Player screen afterward.
             </Text>
+            <TextInput
+              style={styles.input}
+              value={teamSeasonLabel}
+              onChangeText={setTeamSeasonLabel}
+              placeholder="Season name (optional, e.g. Fall 2026)"
+              placeholderTextColor={colors.textMuted}
+            />
             <View style={styles.seasonButtonRow}>
               <Pressable
                 style={[styles.seasonButton, switchingSeason && styles.buttonDisabled]}

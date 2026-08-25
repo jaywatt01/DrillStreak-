@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
@@ -23,7 +23,7 @@ import {
   ShootingComposite,
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
-import { getActiveSeason, listSeasonHistory, Season, SeasonSummary, summarizeSeason } from '../lib/seasons';
+import { getActiveSeason, listSeasonHistory, renameSeason, Season, SeasonSummary, summarizeSeason } from '../lib/seasons';
 
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
@@ -56,6 +56,8 @@ export default function ProgressScreen() {
   const [breakdown, setBreakdown] = useState<{ title: string; entries: ShootingBreakdownEntry[] } | null>(null);
   const [seasonDetail, setSeasonDetail] = useState<{ season: Season; summary: SeasonSummary } | null>(null);
   const [loadingSeasonDetail, setLoadingSeasonDetail] = useState<string | null>(null);
+  const [seasonRenameText, setSeasonRenameText] = useState('');
+  const [savingSeasonRename, setSavingSeasonRename] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -126,10 +128,35 @@ export default function ProgressScreen() {
     try {
       const summary = await summarizeSeason(playerId, season.id);
       setSeasonDetail({ season, summary });
+      setSeasonRenameText(season.label);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load season detail.');
     } finally {
       setLoadingSeasonDetail(null);
+    }
+  };
+
+  // Real gap Jay caught: a past season's auto-generated label had no way
+  // to change afterward either, not just the active one. Renaming here
+  // (from the same detail view someone already opened to look at that
+  // season) updates the row list too, not just this modal's own title.
+  const handleSaveSeasonDetailRename = async () => {
+    if (!seasonDetail || !seasonRenameText.trim()) return;
+    setSavingSeasonRename(true);
+    try {
+      await renameSeason(seasonDetail.season.id, seasonRenameText.trim());
+      const renamed = { ...seasonDetail.season, label: seasonRenameText.trim() };
+      setSeasonDetail({ ...seasonDetail, season: renamed });
+      setProgress((current) =>
+        current.map((p) => ({
+          ...p,
+          pastSeasons: p.pastSeasons.map((s) => (s.id === renamed.id ? renamed : s)),
+        }))
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to rename season.');
+    } finally {
+      setSavingSeasonRename(false);
     }
   };
 
@@ -343,7 +370,26 @@ export default function ProgressScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{seasonDetail?.season.label}</Text>
+            <View style={styles.editButtonRow}>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                value={seasonRenameText}
+                onChangeText={setSeasonRenameText}
+                placeholder="Season name"
+                placeholderTextColor={colors.textMuted}
+              />
+              <Pressable
+                style={[styles.smallButton, (!seasonRenameText.trim() || savingSeasonRename) && styles.buttonDisabled]}
+                onPress={handleSaveSeasonDetailRename}
+                disabled={!seasonRenameText.trim() || savingSeasonRename}
+              >
+                {savingSeasonRename ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.smallButtonText}>Rename</Text>
+                )}
+              </Pressable>
+            </View>
             {seasonDetail ? (
               <View style={{ gap: 10 }}>
                 <View style={styles.streakCard}>
@@ -512,7 +558,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: 10,
     paddingVertical: 12,
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
   smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  buttonDisabled: { opacity: 0.6 },
+  editButtonRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: colors.background,
+  },
 });
