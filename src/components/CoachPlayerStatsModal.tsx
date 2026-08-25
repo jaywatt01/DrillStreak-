@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import StreakCalendar from './StreakCalendar';
+import BadgeLegend from './BadgeLegend';
 import {
   calculateStreak,
   CompletionHistoryEntry,
@@ -17,7 +19,9 @@ import {
   ShootingBreakdownEntry,
   ShootingComposite,
 } from '../lib/players';
+import { mondayOfThisWeek } from '../lib/date';
 import { getActiveSeason, Season } from '../lib/seasons';
+import { Badge, filterCurrentBadges, listBadges } from '../lib/badges';
 
 // How much calendar history to render — matches ProgressScreen's
 // parent-tier view. What actually shows up in `history` is already gated
@@ -31,14 +35,30 @@ type Props = {
   playerId: string;
   playerName: string;
   onClose: () => void;
+  // Only pass this when opening the modal for the account's OWN player
+  // (the "tap your name on Home" path, added 2026-08-25) — it gates
+  // history/shooting/reps the same way ProgressScreen already does for a
+  // free-tier account. Omit it (leave undefined) for the existing coach
+  // and teammate call sites: those were never about the OWNER's own
+  // subscription tier, and completions_coach_read/completions_teammate_read
+  // RLS already governs how much comes back for them. Real gap caught
+  // before shipping the self-view feature: this modal had no client-side
+  // tier gate at all, because it was only ever reached through paths RLS
+  // already restricted server-side — wiring it up for self-view without
+  // this prop would have let a free-tier account see their own full
+  // history here, bypassing the $4.99/mo paywall ProgressScreen enforces
+  // for the exact same data.
+  hasParentTier?: boolean;
 };
 
 // Coach-facing counterpart to ProgressScreen's per-player card — same
 // shared computation helpers (lib/players.ts), same visual shape, but
-// reached from My Team instead of Progress, and with no client-side
-// parent_tier check: how much history actually comes back is entirely
-// up to the completions_coach_read RLS policy on the server.
-export default function CoachPlayerStatsModal({ playerId, playerName, onClose }: Props) {
+// reached from My Team instead of Progress. completions_coach_read /
+// completions_teammate_read RLS governs how much comes back for those two
+// paths; the optional hasParentTier prop above only matters for the third,
+// newer self-view path (see its comment).
+export default function CoachPlayerStatsModal({ playerId, playerName, onClose, hasParentTier }: Props) {
+  const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<CompletionHistoryEntry[]>([]);
@@ -46,21 +66,24 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
   const [activeSeason, setActiveSeason] = useState<Season | null>(null);
   const [streakDates, setStreakDates] = useState<string[]>([]);
   const [notes, setNotes] = useState<PlayerNote[]>([]);
+  const [badges, setBadges] = useState<Badge[]>([]);
   const [breakdown, setBreakdown] = useState<{ title: string; entries: ShootingBreakdownEntry[] } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [h, n, season] = await Promise.all([
+      const [h, n, season, b] = await Promise.all([
         getCompletionHistory(playerId),
         getPlayerNotes(playerId),
         getActiveSeason(playerId),
+        listBadges(playerId),
       ]);
       setHistory(h);
       setAllDates(h.map((entry) => entry.date));
       setNotes(n);
       setActiveSeason(season);
+      setBadges(b);
       // "Current streak" scopes to the active season once one exists
       // (same reasoning as Home/Progress — a fresh-start feel at a season
       // boundary, without touching a row of the underlying history), but
@@ -80,12 +103,21 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
   }, [load]);
 
   const streak = calculateStreak(streakDates);
-  const freeThrows: ShootingComposite | null = computeMakesAttemptsTotal(history, isFreeThrowDrill);
-  const shooting: ShootingComposite | null = computeMakesAttemptsTotal(history, (name) => !isFreeThrowDrill(name));
-  const repTallies: RepTally[] = computeRepTallies(history);
+  // Only the self-view path (hasParentTier explicitly false) slices — the
+  // coach/teammate paths pass nothing and see whatever RLS already sends.
+  const weekStart = mondayOfThisWeek();
+  const visibleHistory = hasParentTier === false ? history.filter((h) => h.date >= weekStart) : history;
+  const hasMoreHistory = hasParentTier === false && history.length > visibleHistory.length;
+  const freeThrows: ShootingComposite | null = computeMakesAttemptsTotal(visibleHistory, isFreeThrowDrill);
+  const shooting: ShootingComposite | null = computeMakesAttemptsTotal(
+    visibleHistory,
+    (name) => !isFreeThrowDrill(name)
+  );
+  const repTallies: RepTally[] = computeRepTallies(visibleHistory);
+  const currentSeasonBadges = filterCurrentBadges(badges, activeSeason);
 
   const openBreakdown = (title: string, matches: (drillName: string) => boolean) => {
-    setBreakdown({ title, entries: computeShootingBreakdown(history, matches) });
+    setBreakdown({ title, entries: computeShootingBreakdown(visibleHistory, matches) });
   };
 
   return (
@@ -173,11 +205,18 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
                 </View>
               ) : null}
 
+              {badges.length > 0 ? (
+                <View style={styles.badgesSection}>
+                  <Text style={styles.repTalliesLabel}>Badges</Text>
+                  <BadgeLegend currentSeasonBadges={currentSeasonBadges} allBadges={badges} />
+                </View>
+              ) : null}
+
               <Text style={styles.historyLabel}>History</Text>
-              {history.length === 0 ? (
+              {visibleHistory.length === 0 ? (
                 <Text style={styles.placeholder}>Nothing logged yet.</Text>
               ) : (
-                history.map((entry) => (
+                visibleHistory.map((entry) => (
                   <View key={entry.date} style={styles.historyRow}>
                     <Text style={styles.historyDate}>{entry.date}</Text>
                     <Text style={styles.historyDrills}>
@@ -196,6 +235,23 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
                   </View>
                 ))
               )}
+
+              {hasMoreHistory ? (
+                <Pressable
+                  style={styles.upsellCard}
+                  onPress={() => {
+                    onClose();
+                    navigation.navigate('Account' as never);
+                  }}
+                >
+                  <Text style={styles.upsellTitle}>See {playerName}'s full history</Text>
+                  <Text style={styles.upsellBody}>
+                    Free shows this week only. Parent membership ($4.99/mo) unlocks everything
+                    they've ever logged, for every linked player.
+                  </Text>
+                  <Text style={styles.upsellLink}>Upgrade in Account →</Text>
+                </Pressable>
+              ) : null}
             </ScrollView>
           )}
 
@@ -276,6 +332,18 @@ const styles = StyleSheet.create({
   repTallyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   repTallyName: { fontSize: 14, color: colors.text, flex: 1, marginRight: 12 },
   repTallyValue: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  badgesSection: { gap: 8 },
+  upsellCard: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: '#FFF8EA',
+    gap: 4,
+  },
+  upsellTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
+  upsellBody: { fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  upsellLink: { fontSize: 13, fontWeight: '700', color: colors.primary, marginTop: 2 },
   notesSection: { gap: 8 },
   noteCard: {
     borderWidth: 1,
