@@ -28,6 +28,7 @@ import {
   updatePlayerProfile,
 } from '../lib/players';
 import { joinTeamByInviteCode } from '../lib/team';
+import { getActiveSeason, startInSeason, startOffseason, summarizeSeason } from '../lib/seasons';
 
 export default function AddPlayerScreen() {
   const navigation = useNavigation();
@@ -146,6 +147,67 @@ export default function AddPlayerScreen() {
     }
   };
 
+  // Individual toggle for a self-tracked player with no coach to flip it
+  // for them — same underlying startOffseason/startInSeason as the coach's
+  // bulk action on My Team, just scoped to one player. Fetches the
+  // current mode on demand (not kept in local state) since it's only
+  // needed the moment this menu opens.
+  const handleOpenSeasonMenu = async (player: Player) => {
+    let active;
+    try {
+      active = await getActiveSeason(player.id);
+    } catch (e) {
+      Alert.alert('Could not load season', e instanceof Error ? e.message : 'Something went wrong.');
+      return;
+    }
+    const isOffseason = active?.isOffseason ?? false;
+    const doSwitch = (toOffseason: boolean) => {
+      Alert.alert(
+        toOffseason ? 'Start offseason?' : 'Start a new season?',
+        "Your stats stay saved — nothing is deleted, you can look back at any past season anytime from Progress.",
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: toOffseason ? 'Start Offseason' : 'Start New Season',
+            onPress: async () => {
+              try {
+                const result = await (toOffseason ? startOffseason(player.id) : startInSeason(player.id));
+                if (result.closedSeason) {
+                  // The recap — shown right here, the one moment "a season
+                  // just closed" is actually true, not a separate screen
+                  // someone has to remember to go check.
+                  const summary = await summarizeSeason(player.id, result.closedSeason.id);
+                  const shootingLine = summary.shooting
+                    ? `Shooting: ${summary.shooting.makes}/${summary.shooting.attempts} (${Math.round((summary.shooting.makes / summary.shooting.attempts) * 100)}%)\n`
+                    : '';
+                  const ftLine = summary.freeThrows
+                    ? `Free throws: ${summary.freeThrows.makes}/${summary.freeThrows.attempts} (${Math.round((summary.freeThrows.makes / summary.freeThrows.attempts) * 100)}%)\n`
+                    : '';
+                  Alert.alert(
+                    `${result.closedSeason.label} — recap`,
+                    `Best streak: ${summary.bestStreak} ${summary.bestStreak === 1 ? 'day' : 'days'}\n${shootingLine}${ftLine}Total reps: ${summary.totalReps}\n\nSaved for good — see it anytime in Progress under Season History.`
+                  );
+                } else {
+                  Alert.alert('Done', toOffseason ? 'Offseason started.' : 'New season started.');
+                }
+              } catch (e) {
+                Alert.alert('Could not switch season', e instanceof Error ? e.message : 'Something went wrong.');
+              }
+            },
+          },
+        ]
+      );
+    };
+    Alert.alert(
+      `${player.display_name}'s season`,
+      isOffseason ? 'Currently in the offseason.' : 'Currently in-season.',
+      [
+        { text: isOffseason ? 'Start New Season' : 'Start Offseason', onPress: () => doSwitch(!isOffseason) },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
   const handleLongPressPlayer = (player: Player) => {
     Alert.alert(player.display_name, 'What would you like to do?', [
       {
@@ -160,6 +222,7 @@ export default function AddPlayerScreen() {
           setEditStatsVisible(player.stats_visible_to_team);
         },
       },
+      { text: 'Season', onPress: () => handleOpenSeasonMenu(player) },
       {
         text: 'Delete',
         style: 'destructive',

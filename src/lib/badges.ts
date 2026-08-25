@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-export type BadgeType = 'streak_7' | 'streak_30' | 'streak_100' | 'challenge_won';
+export type BadgeType = 'streak_7' | 'streak_30' | 'streak_100' | 'challenge_won' | 'offseason_completed';
 
 export type Badge = {
   id: string;
@@ -20,6 +20,7 @@ export const BADGE_LABELS: Record<BadgeType, string> = {
   streak_30: '30-day streak',
   streak_100: '100-day streak',
   challenge_won: 'Challenge won',
+  offseason_completed: 'Offseason completed',
 };
 
 function mapBadgeRow(row: { id: string; type: string; challenge_id: string | null; earned_at: string }): Badge {
@@ -51,6 +52,27 @@ export async function awardStreakBadgesIfNeeded(playerId: string, currentStreak:
     .from('badges')
     .upsert(
       { player_id: playerId, type: crossed.type, dedupe_key: crossed.type },
+      { onConflict: 'player_id,dedupe_key', ignoreDuplicates: true }
+    );
+  if (error) throw error;
+}
+
+// One badge per completed offseason (dedupe_key keyed by the closed
+// season's id, not a singleton) — a player who does this every year
+// should collect one each time, same shape as challenge_won. Called from
+// seasons.ts's startInSeason flow only when the just-closed season was
+// (a) actually an offseason and (b) had real activity logged in it — no
+// participation trophy for toggling offseason on and immediately back off
+// without doing anything.
+export async function awardOffseasonBadgeIfNeeded(playerId: string, offseasonId: string): Promise<void> {
+  const { error } = await supabase
+    .from('badges')
+    .upsert(
+      {
+        player_id: playerId,
+        type: 'offseason_completed',
+        dedupe_key: `offseason_completed:${offseasonId}`,
+      },
       { onConflict: 'player_id,dedupe_key', ignoreDuplicates: true }
     );
   if (error) throw error;

@@ -8,6 +8,7 @@ import {
   computeMakesAttemptsTotal,
   computeRepTallies,
   computeShootingBreakdown,
+  getCompletionDates,
   getCompletionHistory,
   getPlayerNotes,
   isFreeThrowDrill,
@@ -16,6 +17,7 @@ import {
   ShootingBreakdownEntry,
   ShootingComposite,
 } from '../lib/players';
+import { getActiveSeason, Season } from '../lib/seasons';
 
 // How much calendar history to render — matches ProgressScreen's
 // parent-tier view. What actually shows up in `history` is already gated
@@ -41,6 +43,8 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<CompletionHistoryEntry[]>([]);
   const [allDates, setAllDates] = useState<string[]>([]);
+  const [activeSeason, setActiveSeason] = useState<Season | null>(null);
+  const [streakDates, setStreakDates] = useState<string[]>([]);
   const [notes, setNotes] = useState<PlayerNote[]>([]);
   const [breakdown, setBreakdown] = useState<{ title: string; entries: ShootingBreakdownEntry[] } | null>(null);
 
@@ -48,10 +52,22 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
     setLoading(true);
     setError(null);
     try {
-      const [h, n] = await Promise.all([getCompletionHistory(playerId), getPlayerNotes(playerId)]);
+      const [h, n, season] = await Promise.all([
+        getCompletionHistory(playerId),
+        getPlayerNotes(playerId),
+        getActiveSeason(playerId),
+      ]);
       setHistory(h);
       setAllDates(h.map((entry) => entry.date));
       setNotes(n);
+      setActiveSeason(season);
+      // "Current streak" scopes to the active season once one exists
+      // (same reasoning as Home/Progress — a fresh-start feel at a season
+      // boundary, without touching a row of the underlying history), but
+      // the calendar/shooting/rep totals above stay all-time on purpose —
+      // this is the one place both the season-scoped number AND the
+      // career totals are visible together.
+      setStreakDates(season ? await getCompletionDates(playerId, season.id) : h.map((entry) => entry.date));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load stats.');
     } finally {
@@ -63,7 +79,7 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
     load();
   }, [load]);
 
-  const streak = calculateStreak(allDates);
+  const streak = calculateStreak(streakDates);
   const freeThrows: ShootingComposite | null = computeMakesAttemptsTotal(history, isFreeThrowDrill);
   const shooting: ShootingComposite | null = computeMakesAttemptsTotal(history, (name) => !isFreeThrowDrill(name));
   const repTallies: RepTally[] = computeRepTallies(history);
@@ -90,7 +106,9 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose }:
           ) : (
             <ScrollView contentContainerStyle={styles.scrollContent}>
               <View style={styles.streakCard}>
-                <Text style={styles.cardLabel}>Current streak</Text>
+                <Text style={styles.cardLabel}>
+                  Current streak{activeSeason ? ` · ${activeSeason.label}` : ''}
+                </Text>
                 <Text style={styles.cardValue}>
                   {streak} {streak === 1 ? 'day' : 'days'}
                 </Text>

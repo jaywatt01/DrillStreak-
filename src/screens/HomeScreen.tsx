@@ -37,7 +37,10 @@ import {
   WeeklyDrill,
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
+import { mondayOfThisWeek } from '../lib/date';
 import { getPlayerTeams, getPromptForResultsForPlayer } from '../lib/team';
+import { getActiveSeason, Season } from '../lib/seasons';
+import { FocusSuggestion, getOffseasonFocusSuggestion } from '../lib/offseasonPlan';
 import {
   acceptChallenge,
   Challenge,
@@ -70,6 +73,9 @@ type PlayerCardData = {
   source: 'team' | 'library';
   streak: number;
   graceUsed: boolean;
+  activeSeason: Season | null;
+  weeklyGoalCount: number;
+  focusSuggestion: FocusSuggestion | null;
   completedToday: Map<string, DrillResult>;
   promptForResults: boolean;
   challenges: Challenge[];
@@ -203,7 +209,6 @@ export default function HomeScreen() {
         players.map(async (player) => {
           const [
             { drills, source },
-            dates,
             completedToday,
             promptForResults,
             challenges,
@@ -211,9 +216,9 @@ export default function HomeScreen() {
             allDrills,
             workoutTemplates,
             teams,
+            activeSeason,
           ] = await Promise.all([
             getWeeklyDrills(player.id),
-            getCompletionDates(player.id),
             getTodayCompletions(player.id),
             getPromptForResultsForPlayer(player.id),
             getChallengesForPlayer(player.id),
@@ -221,16 +226,38 @@ export default function HomeScreen() {
             listAllDrills(player.id),
             listWorkoutTemplates(player.id),
             getPlayerTeams(player.id),
+            getActiveSeason(player.id),
           ]);
-          const streak = calculateStreak(dates);
-          const graceUsed = wasStreakGraceUsed(dates);
+
+          // Phase 3: once a player has an active season, "current streak"
+          // and the weekly-goal count both scope to just that season's
+          // dates instead of all-time — the fresh-start feeling a new
+          // season is supposed to give, without touching a single row of
+          // the underlying completions (see schema.sql's seasons comment).
+          // No active season at all (never toggled) keeps the exact
+          // original all-time behavior — full backward compatibility for
+          // anyone not using this feature.
+          const dates = await getCompletionDates(player.id, activeSeason?.id);
+          const isOffseason = activeSeason?.isOffseason ?? false;
+
+          const weekStart = mondayOfThisWeek();
+          const weeklyGoalCount = new Set(dates.filter((d) => d >= weekStart)).size;
+
+          const streak = isOffseason ? 0 : calculateStreak(dates);
+          const graceUsed = isOffseason ? false : wasStreakGraceUsed(dates);
+          const focusSuggestion = isOffseason ? await getOffseasonFocusSuggestion(player.id) : null;
 
           // Award-then-list, in that order, so a badge earned by this very
           // load (a streak that just crossed a milestone, a challenge that
           // just ended in a win) shows up immediately instead of a screen
           // behind. Both awards are their own idempotent upsert (see
           // lib/badges.ts) — safe to call on every load, not just once.
-          await awardStreakBadgesIfNeeded(player.id, streak);
+          // Streak badges only make sense in-season — offseason tracks a
+          // weekly goal, not a daily streak, so there's nothing to award
+          // against while isOffseason is true.
+          if (!isOffseason) {
+            await awardStreakBadgesIfNeeded(player.id, streak);
+          }
           await Promise.all(
             challenges
               .filter((c) => {
@@ -249,6 +276,9 @@ export default function HomeScreen() {
             source,
             streak,
             graceUsed,
+            activeSeason,
+            weeklyGoalCount,
+            focusSuggestion,
             completedToday,
             promptForResults,
             challenges,
@@ -661,6 +691,9 @@ export default function HomeScreen() {
             source,
             streak,
             graceUsed,
+            activeSeason,
+            weeklyGoalCount,
+            focusSuggestion,
             completedToday,
             promptForResults,
             challenges,
@@ -671,22 +704,48 @@ export default function HomeScreen() {
             teams,
           }) => {
             const suggestion = activeSuggestion[player.id];
+            const isOffseason = activeSeason?.isOffseason ?? false;
+            const WEEKLY_GOAL_TARGET = 4;
             return (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
             {formatPlayerBio(player) ? (
               <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
             ) : null}
+            {activeSeason ? <Text style={styles.seasonLabel}>{activeSeason.label}</Text> : null}
 
-            <View style={styles.streakCard}>
-              <Text style={styles.streakLabel}>Current streak</Text>
-              <Text style={styles.streakValue}>
-                {streak} {streak === 1 ? 'day' : 'days'}
-              </Text>
-              {graceUsed ? (
-                <Text style={styles.graceNote}>🕊 A missed day this week was forgiven — streak kept.</Text>
-              ) : null}
-            </View>
+            {isOffseason ? (
+              <View style={styles.weeklyGoalCard}>
+                <Text style={styles.streakLabel}>This week's goal</Text>
+                <Text style={styles.streakValue}>
+                  {weeklyGoalCount}/{WEEKLY_GOAL_TARGET} sessions
+                </Text>
+                <Text style={styles.graceNote}>
+                  Offseason mode — a weekly target instead of a daily streak, so travel and camps
+                  don't break anything.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.streakCard}>
+                <Text style={styles.streakLabel}>Current streak</Text>
+                <Text style={styles.streakValue}>
+                  {streak} {streak === 1 ? 'day' : 'days'}
+                </Text>
+                {graceUsed ? (
+                  <Text style={styles.graceNote}>🕊 A missed day this week was forgiven — streak kept.</Text>
+                ) : null}
+              </View>
+            )}
+
+            {isOffseason && focusSuggestion ? (
+              <View style={styles.focusCard}>
+                <Text style={styles.focusLabel}>Suggested focus this offseason</Text>
+                <Text style={styles.focusBody}>
+                  {focusSuggestion.category} was your lowest shooting % last season ({focusSuggestion.pct}%,{' '}
+                  {focusSuggestion.makes}/{focusSuggestion.attempts}). Worth extra reps there.
+                </Text>
+              </View>
+            ) : null}
 
             {badges.length > 0 ? (
               <View style={styles.badgesSection}>
@@ -1042,14 +1101,30 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: '#FFFFFF' },
   buildWorkoutLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   buildWorkoutHint: { fontSize: 11, color: colors.textMuted, marginTop: -4 },
+  seasonLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted, marginTop: -6 },
   streakCard: {
     backgroundColor: colors.primary,
+    borderRadius: 16,
+    padding: 20,
+  },
+  weeklyGoalCard: {
+    backgroundColor: colors.accentDark,
     borderRadius: 16,
     padding: 20,
   },
   streakLabel: { color: '#FFFFFF', fontSize: 14, opacity: 0.9 },
   streakValue: { color: colors.accent, fontSize: 32, fontWeight: '700', marginTop: 4 },
   graceNote: { color: '#FFFFFF', fontSize: 12, opacity: 0.85, marginTop: 6 },
+  focusCard: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: '#FFF8EA',
+    gap: 2,
+  },
+  focusLabel: { fontSize: 13, fontWeight: '700', color: colors.accentDark },
+  focusBody: { fontSize: 13, color: colors.text, lineHeight: 18, marginTop: 2 },
   badgesSection: { gap: 6 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
