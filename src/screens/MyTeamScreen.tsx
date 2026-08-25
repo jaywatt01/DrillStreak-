@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
@@ -38,6 +38,7 @@ import {
   RosterPlayer,
   saveMyNoteForPlayer,
   setPromptForResults,
+  subscribeToRosterCompletions,
   Team,
   unassignDrill,
   updateAssignmentSchedule,
@@ -124,6 +125,21 @@ export default function MyTeamScreen() {
       load();
     }, [load])
   );
+
+  // Keeps the Team Overview dots (and the roster activity feed) live while
+  // a coach stays on this tab — useFocusEffect above only refires on
+  // tab-switch, which misses a player logging a drill elsewhere on the
+  // same account without ever leaving My Team. Only subscribes once a team
+  // exists (nothing to watch for before that); re-subscribes if the team
+  // itself changes (rare, but a stale channel from a deleted team is worse
+  // than one extra subscribe call).
+  useEffect(() => {
+    if (!team) return;
+    const channel = subscribeToRosterCompletions(load);
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [team?.id, load]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -460,64 +476,46 @@ export default function MyTeamScreen() {
           ) : (
             <>
               <Text style={styles.placeholder}>
-                Tap Stats to see a player's streak, shooting, and history. Tap Note to add or
-                edit your note about them. Long-press to remove them from the roster.
-              </Text>
-              {roster.map((p) => (
-                <Pressable
-                  key={p.id}
-                  style={styles.rosterRow}
-                  onPress={() => setStatsPlayer(p)}
-                  onLongPress={() => handleLongPressRosterPlayer(p)}
-                >
-                  <Text style={styles.rosterName}>{p.display_name}</Text>
-                  <View style={styles.rosterLinks}>
-                    <Text style={styles.statsLink}>Stats</Text>
-                    <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
-                      <Text style={styles.noteLink}>Note</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
-                          teamId: team.id,
-                          threadUserId: p.contactUserId,
-                          view: 'messages',
-                        })
-                      }
-                      hitSlop={8}
-                    >
-                      <Text style={styles.messageLink}>Message</Text>
-                    </Pressable>
-                  </View>
-                </Pressable>
-              ))}
-            </>
-          )}
-
-          {roster.length > 0 ? (
-            <>
-              <Text style={styles.sectionTitle}>Team overview — this week</Text>
-              <Text style={styles.placeholder}>
-                A green dot means that player logged something that day. Tap a row for their full
-                history — this is the same data as the roster activity feed below, just grouped
-                by player instead of listed event-by-event, so it stays readable at a glance even
-                with 15-20 kids on the roster.
+                Green dots show who logged something this week, Mon-Sun. Tap a row (or Stats) for
+                a player's full streak/shooting/history. Tap Note to add or edit your note about
+                them. Long-press to remove them from the roster.
               </Text>
               {roster.map((p) => {
-                const datesThisWeek = rosterCompletions
-                  .filter((c) => c.playerId === p.id)
-                  .map((c) => c.date);
+                const datesThisWeek = rosterCompletions.filter((c) => c.playerId === p.id).map((c) => c.date);
                 return (
-                  <Pressable key={p.id} style={styles.overviewRow} onPress={() => setStatsPlayer(p)}>
-                    <Text style={styles.overviewName} numberOfLines={1}>
-                      {p.display_name}
-                    </Text>
+                  <Pressable
+                    key={p.id}
+                    style={styles.rosterRow}
+                    onPress={() => setStatsPlayer(p)}
+                    onLongPress={() => handleLongPressRosterPlayer(p)}
+                  >
+                    <View style={styles.rosterTopRow}>
+                      <Text style={styles.rosterName}>{p.display_name}</Text>
+                      <View style={styles.rosterLinks}>
+                        <Text style={styles.statsLink}>Stats</Text>
+                        <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
+                          <Text style={styles.noteLink}>Note</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() =>
+                            (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
+                              teamId: team.id,
+                              threadUserId: p.contactUserId,
+                              view: 'messages',
+                            })
+                          }
+                          hitSlop={8}
+                        >
+                          <Text style={styles.messageLink}>Message</Text>
+                        </Pressable>
+                      </View>
+                    </View>
                     <WeekDotsRow completedDates={datesThisWeek} />
                   </Pressable>
                 );
               })}
             </>
-          ) : null}
+          )}
 
           <Text style={styles.sectionTitle}>This week's drills</Text>
           <Text style={styles.placeholder}>
@@ -780,9 +778,7 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   rosterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
@@ -790,21 +786,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: colors.surface,
   },
+  rosterTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
   rosterLinks: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   statsLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
-  overviewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: colors.surface,
-  },
-  overviewName: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1, marginRight: 12 },
   noteLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   messageLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   drillRow: {
