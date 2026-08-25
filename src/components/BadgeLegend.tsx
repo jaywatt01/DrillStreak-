@@ -53,6 +53,7 @@ export default function BadgeLegend({ currentSeasonBadges, allBadges }: Props) {
                 Earned {lifetimeCount} {lifetimeCount === 1 ? 'time' : 'times'}
               </Text>
             ) : null}
+            <Text style={styles.scopeTag}>{isSeasonScoped ? 'Resets each season' : 'Lifetime'}</Text>
             <Text style={styles.howTo}>{BADGE_HOW_TO_EARN[type]}</Text>
           </View>
         );
@@ -84,5 +85,6 @@ const styles = StyleSheet.create({
   labelEarned: { color: colors.accentDark },
   labelUnearned: { color: colors.textMuted },
   countText: { fontSize: 12, fontWeight: '600', color: colors.primary },
+  scopeTag: { fontSize: 10, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', marginTop: 2 },
   howTo: { fontSize: 11, color: colors.textMuted, lineHeight: 15, marginTop: 2 },
 });
