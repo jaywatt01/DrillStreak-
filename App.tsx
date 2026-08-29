@@ -10,6 +10,7 @@ import { supabase } from './src/lib/supabase';
 import { clearPurchasesUser, configurePurchases, identifyPurchasesUser } from './src/lib/purchases';
 import { registerForPushNotifications } from './src/lib/pushNotifications';
 import AuthScreen from './src/screens/AuthScreen';
+import DashboardScreen from './src/screens/DashboardScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import MyTeamScreen from './src/screens/MyTeamScreen';
 import AddPlayerScreen from './src/screens/AddPlayerScreen';
@@ -21,7 +22,8 @@ import { colors } from './src/theme/colors';
 const Tab = createBottomTabNavigator();
 
 const TAB_ICONS: Record<string, string> = {
-  Home: '🏠',
+  Dashboard: '🏠',
+  Home: '🏀',
   'My Team': '👥',
   'Add a Player': '➕',
   Progress: '📈',
@@ -163,7 +165,8 @@ export default function App() {
           ),
         })}
       >
-        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Today' }} />
+        <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
+        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
         <Tab.Screen name="My Team" component={MyTeamScreen} />
         <Tab.Screen name="Add a Player" component={AddPlayerScreen} />
         <Tab.Screen name="Progress" component={ProgressScreen} />
