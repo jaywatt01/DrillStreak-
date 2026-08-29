@@ -12,13 +12,16 @@ import {
 type Props = {
   // The 4 streak badges (7/30/60/100-day) reset every season — earned/
   // unearned here reflects THIS season only, already filtered by the
-  // caller (see filterCurrentBadges in lib/badges.ts). challenge_won and
-  // offseason_completed are lifetime badges, so their entries in this list
-  // don't matter — allBadges below is what those two actually read from.
+  // caller (see filterCurrentBadges in lib/badges.ts).
   currentSeasonBadges: Badge[];
-  // Unfiltered, every badge this player has ever earned — used only for
-  // the two lifetime types, to show a real "earned N times" count instead
-  // of a plain earned/unearned toggle.
+  // Unfiltered, every badge this player has ever earned, across every
+  // season — the career/aggregate count. Since a streak badge's dedupe_key
+  // now folds in the season id, a player can earn e.g. streak_30 at most
+  // once per season, so this count for a streak type is really "how many
+  // separate seasons have you hit this" — real gap Jay caught 2026-08-25:
+  // resetting the season-scoped badges shouldn't mean losing the career
+  // story ("hit the 100-day badge 4 seasons running"), same recruiting-
+  // narrative value as challenge_won/offseason_completed's own counts.
   allBadges: Badge[];
 };
 
@@ -26,13 +29,12 @@ type Props = {
 // been earned — an unearned badge shows greyed out rather than being
 // omitted, so "what's left to earn" is visible at a glance, not just
 // "what I have." Streak badges (2026-08-25: now season-scoped) light up
-// based on this season alone; challenge_won/offseason_completed stay
-// lifetime and show a real count once earned more than once.
+// based on this season alone, but every type — including streak badges —
+// shows its real lifetime count once earned more than zero times.
 export default function BadgeLegend({ currentSeasonBadges, allBadges }: Props) {
   const currentSeasonTypes = new Set(currentSeasonBadges.map((b) => b.type));
   const lifetimeCountByType = new Map<string, number>();
   for (const b of allBadges) {
-    if (SEASON_SCOPED_BADGE_TYPES.includes(b.type)) continue;
     lifetimeCountByType.set(b.type, (lifetimeCountByType.get(b.type) ?? 0) + 1);
   }
 
@@ -48,9 +50,11 @@ export default function BadgeLegend({ currentSeasonBadges, allBadges }: Props) {
             <Text style={[styles.label, earned ? styles.labelEarned : styles.labelUnearned]}>
               {BADGE_LABELS[type]}
             </Text>
-            {!isSeasonScoped && lifetimeCount > 0 ? (
+            {lifetimeCount > 0 ? (
               <Text style={styles.countText}>
-                Earned {lifetimeCount} {lifetimeCount === 1 ? 'time' : 'times'}
+                {isSeasonScoped
+                  ? `Hit in ${lifetimeCount} ${lifetimeCount === 1 ? 'season' : 'seasons'}`
+                  : `Earned ${lifetimeCount} ${lifetimeCount === 1 ? 'time' : 'times'}`}
               </Text>
             ) : null}
             <Text style={styles.scopeTag}>{isSeasonScoped ? 'Resets each season' : 'Lifetime'}</Text>
