@@ -707,15 +707,6 @@ export default function HomeScreen() {
     >
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {cards.length > 0 ? (
-        <Pressable
-          style={styles.teammatesTopLink}
-          onPress={() => setTeammatesForPlayerId(cards[0].player.id)}
-        >
-          <Text style={styles.teammatesLink}>Teammates</Text>
-        </Pressable>
-      ) : null}
-
       {cards.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.sectionTitle}>No players yet</Text>
@@ -755,9 +746,18 @@ export default function HomeScreen() {
             const WEEKLY_GOAL_TARGET = 4;
             return (
           <View key={player.id} style={styles.playerSection}>
-            <Pressable onPress={() => setViewingOwnProfileFor({ id: player.id, name: player.display_name })}>
-              <Text style={styles.playerName}>{player.display_name}</Text>
-            </Pressable>
+            <View style={styles.playerNameRow}>
+              <Pressable onPress={() => setViewingOwnProfileFor({ id: player.id, name: player.display_name })}>
+                <Text style={styles.playerName}>{player.display_name}</Text>
+              </Pressable>
+              {/* Scoped per-player now (2026-08-25, real gap Jay caught) —
+                  used to be one global link defaulting to cards[0], so a
+                  multi-kid account had no way to see a second/third kid's
+                  teammates at all. */}
+              <Pressable onPress={() => setTeammatesForPlayerId(player.id)} hitSlop={8}>
+                <Text style={styles.teammatesLink}>Teammates</Text>
+              </Pressable>
+            </View>
             {formatPlayerBio(player) ? (
               <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
             ) : null}
@@ -1155,8 +1155,8 @@ const styles = StyleSheet.create({
   error: { color: '#C4362B', fontSize: 13 },
   emptyState: { gap: 12 },
   playerSection: { gap: 10, marginBottom: 8 },
+  playerNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   playerName: { fontSize: 20, fontWeight: '700', color: colors.text },
-  teammatesTopLink: { alignSelf: 'flex-end' },
   teammatesLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   playerBio: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: -4 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
