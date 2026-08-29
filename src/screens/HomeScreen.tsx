@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,7 +15,7 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import RecordClipModal from '../components/RecordClipModal';
 import TeammatesModal from '../components/TeammatesModal';
@@ -129,6 +129,15 @@ function timeForToday(scheduledTime: string | null): Date {
 
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
+  // Lets the Home dashboard's "View →" (challenges) link actually land on
+  // the right player instead of wherever this screen was last scrolled —
+  // real gap Jay caught 2026-08-25: navigate('Home') alone has no way to
+  // know which of possibly several player cards to show. scrollViewRef +
+  // sectionOffsets (populated via each card's onLayout) let the effect
+  // below scroll to the right one once route.params.playerId is set.
+  const scrollViewRef = useRef<ScrollView>(null);
+  const sectionOffsets = useRef<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cards, setCards] = useState<PlayerCardData[]>([]);
@@ -323,6 +332,25 @@ export default function HomeScreen() {
       load();
     }, [load])
   );
+
+  // Scrolls to a specific player's card once cards are loaded and laid
+  // out — the Home dashboard passes { playerId } when routing here from a
+  // player's "View →" (challenges) link. A short delay, not an onLayout
+  // callback alone, because navigate() can land on an already-mounted
+  // screen (tab navigators keep every screen alive) where layouts already
+  // fired before this params change arrived — the timeout gives the just-
+  // triggered re-render a moment to settle before measuring.
+  useEffect(() => {
+    const targetPlayerId = (route.params as { playerId?: string } | undefined)?.playerId;
+    if (!targetPlayerId || cards.length === 0) return;
+    const timer = setTimeout(() => {
+      const y = sectionOffsets.current[targetPlayerId];
+      if (y != null) {
+        scrollViewRef.current?.scrollTo({ y, animated: true });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [route.params, cards.length]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -716,6 +744,7 @@ export default function HomeScreen() {
   return (
     <>
     <ScrollView
+      ref={scrollViewRef}
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -760,7 +789,13 @@ export default function HomeScreen() {
             const isOffseason = activeSeason?.isOffseason ?? false;
             const WEEKLY_GOAL_TARGET = 4;
             return (
-          <View key={player.id} style={styles.playerSection}>
+          <View
+            key={player.id}
+            style={styles.playerSection}
+            onLayout={(e) => {
+              sectionOffsets.current[player.id] = e.nativeEvent.layout.y;
+            }}
+          >
             <View style={styles.playerNameRow}>
               <Pressable onPress={() => setViewingOwnProfileFor({ id: player.id, name: player.display_name })}>
                 <Text style={styles.playerName}>{player.display_name}</Text>

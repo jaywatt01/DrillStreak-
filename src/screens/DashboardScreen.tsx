@@ -226,7 +226,11 @@ export default function DashboardScreen() {
               {card.activeChallengeCount > 0 ? (
                 <Pressable
                   style={styles.statRow}
-                  onPress={() => (navigation.navigate as (name: never) => void)('Home' as never)}
+                  onPress={() =>
+                    (navigation.navigate as (name: never, params?: object) => void)('Home' as never, {
+                      playerId: card.player.id,
+                    })
+                  }
                 >
                   <Text style={styles.statLabel}>
                     {card.activeChallengeCount} active {card.activeChallengeCount === 1 ? 'challenge' : 'challenges'}
