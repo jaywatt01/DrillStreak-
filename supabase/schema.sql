@@ -90,7 +90,13 @@ create table teams (
   -- verification doesn't make self-reported data more honest, it just
   -- makes skipping it look like a fabricated number instead of an honest
   -- blank. Default false so existing teams' behavior doesn't silently change.
-  prompt_for_results boolean not null default false
+  prompt_for_results boolean not null default false,
+  -- Added 2026-08-25 for the (currently off) team-logo feature — see
+  -- TEAM_LOGO_ENABLED in src/lib/teamLogo.ts and the team-logos storage
+  -- bucket below. A storage PATH, not a public URL (the bucket is private,
+  -- same pattern as team-media's media_url) — resolved to a short-lived
+  -- signed URL at render time via getTeamLogoUrl.
+  logo_url text
 );
 
 create table team_memberships (
@@ -1478,6 +1484,59 @@ create policy team_media_delete on storage.objects
   for delete
   using (
     bucket_id = 'team-media'
+    and exists (
+      select 1 from teams t
+      where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+    )
+  );
+
+-- ---------------------------------------------------------------------------
+-- team-logos storage bucket: added 2026-08-25, same "build now, flip later"
+-- shape as team-media above — exists so nothing needs rebuilding once
+-- TEAM_LOGO_ENABLED (src/lib/teamLogo.ts) is switched on, but isn't wired
+-- into any screen yet and nothing can reach it while the flag is off.
+-- Path convention: {team_id}/logo.{ext}, one file per team (insert uses
+-- upsert:true so a re-upload replaces it, not accumulates). Unlike
+-- team-media (any team member can post), only the coach can write —
+-- team branding is a roster-identity decision, not something any parent
+-- posts, matching the coach-only-write convention already used for
+-- team_events/assignments.
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('team-logos', 'team-logos', false)
+on conflict (id) do nothing;
+
+create policy team_logos_select on storage.objects
+  for select
+  using (
+    bucket_id = 'team-logos'
+    and is_on_team((storage.foldername(name))[1]::uuid, auth.uid())
+  );
+
+create policy team_logos_coach_insert on storage.objects
+  for insert
+  with check (
+    bucket_id = 'team-logos'
+    and exists (
+      select 1 from teams t
+      where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+    )
+  );
+
+create policy team_logos_coach_update on storage.objects
+  for update
+  using (
+    bucket_id = 'team-logos'
+    and exists (
+      select 1 from teams t
+      where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+    )
+  );
+
+create policy team_logos_coach_delete on storage.objects
+  for delete
+  using (
+    bucket_id = 'team-logos'
     and exists (
       select 1 from teams t
       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
@@ -3011,3 +3070,57 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- create policy scheduled_drills_owner_access on scheduled_drills
 --   for all
 --   using (is_player_owner_or_guardian(scheduled_drills.player_id, auth.uid()));
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — team logo
+-- (currently off — see TEAM_LOGO_ENABLED in src/lib/teamLogo.ts). Run
+-- against the live project — idempotent, safe even if part of this was
+-- already applied. Building this now, off, is the same "nothing to
+-- rebuild later" reasoning already applied to team-media.
+-- ---------------------------------------------------------------------------
+-- alter table teams add column if not exists logo_url text;
+--
+-- insert into storage.buckets (id, name, public)
+-- values ('team-logos', 'team-logos', false)
+-- on conflict (id) do nothing;
+--
+-- drop policy if exists team_logos_select on storage.objects;
+-- create policy team_logos_select on storage.objects
+--   for select
+--   using (
+--     bucket_id = 'team-logos'
+--     and is_on_team((storage.foldername(name))[1]::uuid, auth.uid())
+--   );
+--
+-- drop policy if exists team_logos_coach_insert on storage.objects;
+-- create policy team_logos_coach_insert on storage.objects
+--   for insert
+--   with check (
+--     bucket_id = 'team-logos'
+--     and exists (
+--       select 1 from teams t
+--       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+--     )
+--   );
+--
+-- drop policy if exists team_logos_coach_update on storage.objects;
+-- create policy team_logos_coach_update on storage.objects
+--   for update
+--   using (
+--     bucket_id = 'team-logos'
+--     and exists (
+--       select 1 from teams t
+--       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+--     )
+--   );
+--
+-- drop policy if exists team_logos_coach_delete on storage.objects;
+-- create policy team_logos_coach_delete on storage.objects
+--   for delete
+--   using (
+--     bucket_id = 'team-logos'
+--     and exists (
+--       select 1 from teams t
+--       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
+--     )
+--   );
