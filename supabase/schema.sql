@@ -1393,6 +1393,35 @@ create policy team_events_coach_delete on team_events
 alter publication supabase_realtime add table team_events;
 
 -- ---------------------------------------------------------------------------
+-- scheduled_drills: added 2026-08-25 for the Home dashboard's schedule view.
+-- A record of when a player tapped "Add to Calendar" on a drill (lib/
+-- calendar.ts's addDrillToCalendar) — that call only ever writes to the
+-- device running the app and is never read back, so without this table a
+-- player-scheduled drill was invisible to the app itself the moment it
+-- landed in the OS calendar. Deliberately its own table, not a widened
+-- `assignments` — assignments only ever carry a suggested time-of-day for
+-- the whole week (no specific date), a different shape than a real
+-- scheduled datetime, and this shouldn't change that table's existing
+-- coach-assignment semantics. Owner-only — a personal scheduling
+-- convenience, not accountability data (that's what completions already
+-- is), so no coach/teammate read policy the way completions/badges have.
+-- ---------------------------------------------------------------------------
+create table scheduled_drills (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  drill_name text not null,
+  scheduled_at timestamptz not null,
+  duration_minutes integer not null,
+  created_at timestamptz not null default now()
+);
+
+alter table scheduled_drills enable row level security;
+
+create policy scheduled_drills_owner_access on scheduled_drills
+  for all
+  using (is_player_owner_or_guardian(scheduled_drills.player_id, auth.uid()));
+
+-- ---------------------------------------------------------------------------
 -- push_tokens: one row per device/token, registered client-side once a user
 -- grants notification permission. Fanout (which tokens get notified about
 -- which new team_messages/team_events row) happens in the
@@ -2961,3 +2990,24 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function has_shared_badge_since(uuid, uuid, text, timestamptz) from public;
 -- revoke all on function has_shared_badge_since(uuid, uuid, text, timestamptz) from anon;
 -- grant execute on function has_shared_badge_since(uuid, uuid, text, timestamptz) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-25) — scheduled_drills,
+-- backing the Home dashboard's schedule view. Run against the live project —
+-- idempotent, safe even if part of this was already applied.
+-- ---------------------------------------------------------------------------
+-- create table if not exists scheduled_drills (
+--   id uuid primary key default gen_random_uuid(),
+--   player_id uuid not null references players(id) on delete cascade,
+--   drill_name text not null,
+--   scheduled_at timestamptz not null,
+--   duration_minutes integer not null,
+--   created_at timestamptz not null default now()
+-- );
+--
+-- alter table scheduled_drills enable row level security;
+--
+-- drop policy if exists scheduled_drills_owner_access on scheduled_drills;
+-- create policy scheduled_drills_owner_access on scheduled_drills
+--   for all
+--   using (is_player_owner_or_guardian(scheduled_drills.player_id, auth.uid()));

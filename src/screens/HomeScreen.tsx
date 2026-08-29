@@ -40,6 +40,7 @@ import {
   WeeklyDrill,
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
+import { recordScheduledDrill } from '../lib/schedule';
 import { mondayOfThisWeek } from '../lib/date';
 import { getPlayerTeams, getPromptForResultsForPlayer } from '../lib/team';
 import { getActiveSeason, Season } from '../lib/seasons';
@@ -134,7 +135,7 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [addingToCalendarId, setAddingToCalendarId] = useState<string | null>(null);
-  const [schedulingFor, setSchedulingFor] = useState<WeeklyDrill | null>(null);
+  const [schedulingFor, setSchedulingFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
   const [pickerTime, setPickerTime] = useState(new Date());
   const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
   const [loggingResultFor, setLoggingResultFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
@@ -569,10 +570,10 @@ export default function HomeScreen() {
     );
   };
 
-  const openScheduler = (drill: WeeklyDrill) => {
+  const openScheduler = (playerId: string, drill: WeeklyDrill) => {
     setPickerTime(timeForToday(drill.scheduledTime));
     setPickerDuration(String(drill.scheduledDurationMinutes ?? drill.estimatedMinutes ?? DEFAULT_DRILL_MINUTES));
-    setSchedulingFor(drill);
+    setSchedulingFor({ playerId, drill });
   };
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
@@ -595,7 +596,7 @@ export default function HomeScreen() {
       return;
     }
 
-    const drill = schedulingFor;
+    const { playerId, drill } = schedulingFor;
     setSchedulingFor(null);
     setAddingToCalendarId(drill.id);
     try {
@@ -608,6 +609,20 @@ export default function HomeScreen() {
       );
     } finally {
       setAddingToCalendarId(null);
+    }
+    // Separate from the device-calendar export above and never blocking
+    // it — that one only ever reaches the device running the app, and the
+    // app never reads it back, so without this the new Home dashboard's
+    // schedule view would have nothing to show for a player-scheduled
+    // (non-coach-assigned) drill. Failing silently on this specific write
+    // (not surfaced as an alert) is deliberate: the player already got
+    // their real confirmation above for the part they asked for (their
+    // calendar), a second error about an in-app mirror they didn't
+    // explicitly request would just be noise.
+    try {
+      await recordScheduledDrill(playerId, drill.name, pickerTime, minutes);
+    } catch {
+      // Non-fatal — see comment above.
     }
   };
 
@@ -676,7 +691,7 @@ export default function HomeScreen() {
         ) : null}
         <Pressable
           style={styles.iconButton}
-          onPress={() => openScheduler(drill)}
+          onPress={() => openScheduler(playerId, drill)}
           disabled={addingToCalendarId === drill.id}
           hitSlop={8}
         >
@@ -989,7 +1004,7 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{schedulingFor?.name}</Text>
+            <Text style={styles.modalTitle}>{schedulingFor?.drill.name}</Text>
             <Text style={styles.modalLabel}>Time</Text>
             <DateTimePicker
               value={pickerTime}
