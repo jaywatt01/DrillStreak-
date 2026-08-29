@@ -10,8 +10,17 @@ import { mondayOfThisWeek } from '../lib/date';
 import { getActiveSeason, Season } from '../lib/seasons';
 import { Badge, filterCurrentBadges, listBadges } from '../lib/badges';
 import { getPlayerTeams } from '../lib/team';
+import { getUpcomingTeamEvents } from '../lib/teamEvents';
+import { getUpcomingScheduledDrills } from '../lib/schedule';
 import { Challenge, getChallengesForPlayer } from '../lib/challenges';
 import { useParentEntitlement } from '../lib/purchases';
+
+type ScheduleItem = {
+  key: string;
+  title: string;
+  subtitle: string;
+  when: Date;
+};
 
 type DashboardCard = {
   player: Player;
@@ -23,9 +32,23 @@ type DashboardCard = {
   currentSeasonBadges: Badge[];
   teams: { id: string; name: string }[];
   activeChallengeCount: number;
+  scheduleItems: ScheduleItem[];
 };
 
 const WEEKLY_GOAL_TARGET = 4;
+// How many upcoming items to show per player — a preview, not the full
+// calendar. Matches the "compact card, tap through for depth" posture of
+// everything else on this screen, though there's no dedicated full-
+// schedule screen to tap through to yet (drills stay visible on Drills,
+// events on Team Board — this is a merged preview of both, not a new
+// source of truth).
+const SCHEDULE_PREVIEW_COUNT = 5;
+
+function formatScheduleWhen(date: Date): string {
+  const day = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${day}, ${time}`;
+}
 
 // Only meaningful once a challenge is accepted (endsAt set) — pending
 // challenges never call this. Duplicated from HomeScreen's own local copy
@@ -63,11 +86,12 @@ export default function DashboardScreen() {
       const weekStart = mondayOfThisWeek();
       const data = await Promise.all(
         players.map(async (player) => {
-          const [activeSeason, allBadges, teams, challenges] = await Promise.all([
+          const [activeSeason, allBadges, teams, challenges, scheduledDrills] = await Promise.all([
             getActiveSeason(player.id),
             listBadges(player.id),
             getPlayerTeams(player.id),
             getChallengesForPlayer(player.id),
+            getUpcomingScheduledDrills(player.id),
           ]);
           const isOffseason = activeSeason?.isOffseason ?? false;
           const dates = await getCompletionDates(player.id, activeSeason?.id);
@@ -76,6 +100,28 @@ export default function DashboardScreen() {
           const activeChallengeCount = challenges.filter(
             (c: Challenge) => !c.accepted || daysLeft(c.endsAt) > 0
           ).length;
+
+          // Merges two real, separate sources — a player's own scheduled
+          // drills and every team this player is on's shared events — into
+          // one chronological preview. Neither source knows about the
+          // other; this screen is the only place they're combined.
+          const teamEventLists = await Promise.all(teams.map((t) => getUpcomingTeamEvents(t.id)));
+          const scheduleItems: ScheduleItem[] = [
+            ...scheduledDrills.map((d) => ({
+              key: `drill-${d.id}`,
+              title: d.drillName,
+              subtitle: `Drill · ${d.durationMinutes} min`,
+              when: new Date(d.scheduledAt),
+            })),
+            ...teamEventLists.flat().map((e) => ({
+              key: `event-${e.id}`,
+              title: e.title,
+              subtitle: e.eventType ?? 'Team event',
+              when: new Date(`${e.eventDate}T${e.eventTime ?? '09:00:00'}`),
+            })),
+          ]
+            .sort((a, b) => a.when.getTime() - b.when.getTime())
+            .slice(0, SCHEDULE_PREVIEW_COUNT);
 
           return {
             player,
@@ -87,6 +133,7 @@ export default function DashboardScreen() {
             currentSeasonBadges: filterCurrentBadges(allBadges, activeSeason),
             teams,
             activeChallengeCount,
+            scheduleItems,
           };
         })
       );
@@ -187,6 +234,21 @@ export default function DashboardScreen() {
                   <Text style={styles.link}>View →</Text>
                 </Pressable>
               ) : null}
+
+              {card.scheduleItems.length > 0 ? (
+                <View style={styles.scheduleSection}>
+                  <Text style={styles.statLabel}>Upcoming</Text>
+                  {card.scheduleItems.map((item) => (
+                    <View key={item.key} style={styles.scheduleRow}>
+                      <View style={styles.scheduleText}>
+                        <Text style={styles.scheduleTitle}>{item.title}</Text>
+                        <Text style={styles.scheduleSubtitle}>{item.subtitle}</Text>
+                      </View>
+                      <Text style={styles.scheduleWhen}>{formatScheduleWhen(item.when)}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </View>
           ))
         )}
@@ -228,4 +290,21 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 13, color: colors.textMuted, flexShrink: 1 },
   statValue: { fontSize: 14, fontWeight: '700', color: colors.text },
   link: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
+  scheduleSection: { gap: 6, marginTop: 2 },
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.background,
+  },
+  scheduleText: { flex: 1 },
+  scheduleTitle: { fontSize: 13, fontWeight: '600', color: colors.text },
+  scheduleSubtitle: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  scheduleWhen: { fontSize: 12, fontWeight: '600', color: colors.primary },
 });
