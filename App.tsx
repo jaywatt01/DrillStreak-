@@ -168,9 +168,12 @@ export default function App() {
         <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
         <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
         <Tab.Screen name="My Team" component={MyTeamScreen} />
-        <Tab.Screen name="Add a Player" component={AddPlayerScreen} />
+        {/* tabBarLabel only, not title — Jay's explicit call: the tab bar
+            reads "Players" (was getting cut off), but the screen itself
+            (its header) stays "Add a Player". */}
+        <Tab.Screen name="Add a Player" component={AddPlayerScreen} options={{ tabBarLabel: 'Players' }} />
         <Tab.Screen name="Progress" component={ProgressScreen} />
-        <Tab.Screen name="Team Chat" component={TeamBoardScreen} />
+        <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
         <Tab.Screen name="Account" component={AccountScreen} />
       </Tab.Navigator>
     </NavigationContainer>
