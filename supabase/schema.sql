@@ -96,8 +96,63 @@ create table teams (
   -- bucket below. A storage PATH, not a public URL (the bucket is private,
   -- same pattern as team-media's media_url) — resolved to a short-lived
   -- signed URL at render time via getTeamLogoUrl.
-  logo_url text
+  logo_url text,
+  -- Added 2026-08-30: the Team/Program institutional-billing concept from
+  -- the marketing site's pricing page. Null = no institutional plan (the
+  -- default, unpaid state). Deliberately NOT settable by the client SDK —
+  -- see prevent_client_institutional_plan_write() below. There is no
+  -- in-app purchase flow for this yet (Phase 1 is manual Stripe invoicing
+  -- per DRILLSTREAK.md's Payment structure section); Jay sets these two
+  -- columns directly via the Supabase SQL Editor once an invoice is paid,
+  -- the same "run this UPDATE" pattern already used for founder-account
+  -- RevenueCat grants. Null expires_at means an indefinite grant (comp/
+  -- test only) — always set a real date matching the purchased term for
+  -- a genuine paid plan.
+  institutional_plan text check (institutional_plan in ('team', 'program')),
+  institutional_plan_expires_at timestamptz
 );
+
+-- Real security gap caught before this shipped, not after: teams_coach_access
+-- (below) is `for all`, so without protection, any coach could set their own
+-- team's institutional_plan to 'program' for free through the app's normal
+-- client SDK — a straight paywall bypass on real money, not just a data-
+-- visibility gap.
+--
+-- First attempt at this fix (a column-level `revoke update (...) from
+-- authenticated`) was verified against the live project and found to be a
+-- silent no-op: `authenticated` already holds a broad TABLE-level UPDATE
+-- grant on teams (Supabase's default — RLS handles row-level restriction,
+-- not column-level), and Postgres's privilege model doesn't let a
+-- column-specific REVOKE carve out an exception while a table-level grant
+-- remains in effect. Confirmed by directly testing an UPDATE as the
+-- `authenticated` role before trusting the fix, not assumed from the
+-- migration merely succeeding. The actually-effective mechanism is this
+-- trigger, which rejects the write outright regardless of table/RLS
+-- grants — re-tested the same way afterward (name updates succeeded under
+-- the coach's own role/RLS context, institutional_plan did not) before
+-- calling this closed.
+create or replace function prevent_client_institutional_plan_write()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (new.institutional_plan is distinct from old.institutional_plan)
+     or (new.institutional_plan_expires_at is distinct from old.institutional_plan_expires_at) then
+    if auth.role() is distinct from 'service_role' then
+      raise exception 'institutional_plan can only be changed via an elevated connection (the Supabase SQL Editor), not the app.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists teams_protect_institutional_plan on teams;
+create trigger teams_protect_institutional_plan
+before update on teams
+for each row
+execute function prevent_client_institutional_plan_write();
 
 create table team_memberships (
   id uuid primary key default gen_random_uuid(),
@@ -279,6 +334,60 @@ $$;
 revoke all on function player_has_prompt_for_results(uuid) from public;
 revoke all on function player_has_prompt_for_results(uuid) from anon;
 grant execute on function player_has_prompt_for_results(uuid) to authenticated;
+
+-- team_has_active_institutional_plan: true if this team currently has a
+-- paid Team or Program plan that hasn't expired. Internal helper — not
+-- itself meant to be called with an arbitrary/unowned team_id from the
+-- client (see player_has_institutional_access below, which is the real
+-- entry point and re-checks the caller owns/guards the player first,
+-- same security posture as player_has_prompt_for_results above).
+create or replace function team_has_active_institutional_plan(p_team_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select institutional_plan is not null
+    and (institutional_plan_expires_at is null or institutional_plan_expires_at > now())
+  from teams
+  where id = p_team_id;
+$$;
+
+revoke all on function team_has_active_institutional_plan(uuid) from public;
+revoke all on function team_has_active_institutional_plan(uuid) from anon;
+grant execute on function team_has_active_institutional_plan(uuid) to authenticated;
+
+-- player_has_institutional_access: true if this player is on any team
+-- with an active institutional plan — the real check the app calls. This
+-- is additive to, not a replacement for, the existing RevenueCat
+-- parent_tier check: institutional access is per-player (which team a
+-- specific kid is on), while parent_tier is per-account, so a real family
+-- could have one kid covered by a paid Program plan and another kid not
+-- on any team at all. Same ownership re-check as player_has_prompt_for_
+-- results — bypasses teams_coach_access's coach-only SELECT restriction
+-- internally, but can't be used to probe any player other than one the
+-- caller actually owns or guards.
+create or replace function player_has_institutional_access(p_player_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    is_player_owner_or_guardian(p_player_id, auth.uid())
+    and exists (
+      select 1
+      from team_memberships tm
+      where tm.player_id = p_player_id
+        and team_has_active_institutional_plan(tm.team_id)
+    );
+$$;
+
+revoke all on function player_has_institutional_access(uuid) from public;
+revoke all on function player_has_institutional_access(uuid) from anon;
+grant execute on function player_has_institutional_access(uuid) to authenticated;
 
 create policy team_memberships_access on team_memberships
   for all
@@ -1128,6 +1237,42 @@ $$;
 revoke all on function list_my_teams() from public;
 revoke all on function list_my_teams() from anon;
 grant execute on function list_my_teams() to authenticated;
+
+-- list_my_institutional_teams: every team a caller can reach (same
+-- coach-or-guardian union shape as list_my_teams above) that ALSO
+-- currently has an active Team/Program institutional plan. Powers the
+-- Account screen's Program section, which is deliberately invisible by
+-- default (Jay, 2026-08-30: "I don't think I want it to show all of the
+-- time, since the only way to sign up for a program plan is manually
+-- anyway... when a school or district signs up then on all the accounts
+-- on that plan the program/district account shows on their my account
+-- page") — an empty result means nothing renders. security definer for
+-- the same reason as list_my_teams; reuses team_has_active_institutional_
+-- plan and is_player_owner_or_guardian rather than re-deriving the
+-- active-plan or ownership logic here.
+create or replace function list_my_institutional_teams()
+returns table(team_id uuid, team_name text, plan text, expires_at timestamptz, role text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.id, t.name, t.institutional_plan, t.institutional_plan_expires_at, 'coach'::text as role
+  from teams t
+  where t.coach_user_id = auth.uid()
+    and team_has_active_institutional_plan(t.id)
+  union
+  select distinct t.id, t.name, t.institutional_plan, t.institutional_plan_expires_at, 'guardian'::text as role
+  from teams t
+  join team_memberships tm on tm.team_id = t.id
+  where is_player_owner_or_guardian(tm.player_id, auth.uid())
+    and t.coach_user_id <> auth.uid()
+    and team_has_active_institutional_plan(t.id);
+$$;
+
+revoke all on function list_my_institutional_teams() from public;
+revoke all on function list_my_institutional_teams() from anon;
+grant execute on function list_my_institutional_teams() to authenticated;
 
 -- list_team_contacts: the "who can I DM" list for a team, and (as of
 -- 2026-08-24) also what Team Chat renders as each message's sender label.
@@ -3124,3 +3269,122 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       where t.id = (storage.foldername(name))[1]::uuid and t.coach_user_id = auth.uid()
 --     )
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-30) — Team/Program
+-- institutional plan concept, per the marketing site's Team/Program pricing
+-- and Jay's explicit call to build the real entitlement concept rather than
+-- rely on manually comping each family's RevenueCat parent_tier one at a
+-- time. CONFIRMED APPLIED to the live project (jiohhwahvzajvidbiqnm) via
+-- direct Supabase MCP access, same day.
+-- ---------------------------------------------------------------------------
+-- alter table teams add column if not exists institutional_plan text
+--   check (institutional_plan in ('team', 'program'));
+-- alter table teams add column if not exists institutional_plan_expires_at timestamptz;
+--
+-- create or replace function team_has_active_institutional_plan(p_team_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select institutional_plan is not null
+--     and (institutional_plan_expires_at is null or institutional_plan_expires_at > now())
+--   from teams
+--   where id = p_team_id;
+-- $$;
+--
+-- revoke all on function team_has_active_institutional_plan(uuid) from public;
+-- revoke all on function team_has_active_institutional_plan(uuid) from anon;
+-- grant execute on function team_has_active_institutional_plan(uuid) to authenticated;
+--
+-- create or replace function player_has_institutional_access(p_player_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select
+--     is_player_owner_or_guardian(p_player_id, auth.uid())
+--     and exists (
+--       select 1
+--       from team_memberships tm
+--       where tm.player_id = p_player_id
+--         and team_has_active_institutional_plan(tm.team_id)
+--     );
+-- $$;
+--
+-- revoke all on function player_has_institutional_access(uuid) from public;
+-- revoke all on function player_has_institutional_access(uuid) from anon;
+-- grant execute on function player_has_institutional_access(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-30) — real fix for
+-- the institutional_plan write-protection above. The original `revoke
+-- update (institutional_plan, ...) on teams from authenticated` (in the
+-- migration directly above) was verified against the live project and
+-- found to be a SILENT NO-OP: `authenticated` already holds a broad
+-- table-level UPDATE grant on teams (Supabase's default), and a
+-- column-level REVOKE cannot override a table-level grant in Postgres's
+-- privilege model. Caught by directly testing an UPDATE as the
+-- `authenticated` role against the live database before trusting the fix,
+-- not assumed from the migration merely reporting success. CONFIRMED
+-- APPLIED AND RE-TESTED: `name` updates succeeded under the coach's own
+-- role/RLS context in the same test, `institutional_plan` did not.
+-- ---------------------------------------------------------------------------
+-- create or replace function prevent_client_institutional_plan_write()
+-- returns trigger
+-- language plpgsql
+-- security definer
+-- set search_path = public
+-- as $$
+-- begin
+--   if (new.institutional_plan is distinct from old.institutional_plan)
+--      or (new.institutional_plan_expires_at is distinct from old.institutional_plan_expires_at) then
+--     if auth.role() is distinct from 'service_role' then
+--       raise exception 'institutional_plan can only be changed via an elevated connection (the Supabase SQL Editor), not the app.';
+--     end if;
+--   end if;
+--   return new;
+-- end;
+-- $$;
+--
+-- drop trigger if exists teams_protect_institutional_plan on teams;
+-- create trigger teams_protect_institutional_plan
+-- before update on teams
+-- for each row
+-- execute function prevent_client_institutional_plan_write();
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-30) — list_my_
+-- institutional_teams(), the read path for the Account screen's new
+-- Program section (invisible by default, per Jay's explicit ask — only
+-- renders for accounts actually on a team with an active institutional
+-- plan). CONFIRMED APPLIED to the live project (jiohhwahvzajvidbiqnm) via
+-- direct Supabase MCP access, same day.
+-- ---------------------------------------------------------------------------
+-- create or replace function list_my_institutional_teams()
+-- returns table(team_id uuid, team_name text, plan text, expires_at timestamptz, role text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.id, t.name, t.institutional_plan, t.institutional_plan_expires_at, 'coach'::text as role
+--   from teams t
+--   where t.coach_user_id = auth.uid()
+--     and team_has_active_institutional_plan(t.id)
+--   union
+--   select distinct t.id, t.name, t.institutional_plan, t.institutional_plan_expires_at, 'guardian'::text as role
+--   from teams t
+--   join team_memberships tm on tm.team_id = t.id
+--   where is_player_owner_or_guardian(tm.player_id, auth.uid())
+--     and t.coach_user_id <> auth.uid()
+--     and team_has_active_institutional_plan(t.id);
+-- $$;
+--
+-- revoke all on function list_my_institutional_teams() from public;
+-- revoke all on function list_my_institutional_teams() from anon;
+-- grant execute on function list_my_institutional_teams() to authenticated;
