@@ -30,6 +30,15 @@ import {
 
 export default function AccountScreen() {
   const [email, setEmail] = useState<string | null>(null);
+  // Deliberately the raw RevenueCat signal only — NOT combined with
+  // institutional (Team/Program) access like AddPlayerScreen/ProgressScreen/
+  // the self-view modal are. This screen's "Active"/"Manage Subscription"/
+  // "Restore Purchases" UI is specifically about a real purchased
+  // subscription; showing "Manage Subscription" to someone whose access
+  // comes only from a paid team roster would deep-link to Apple's
+  // subscription settings showing nothing to manage. See
+  // src/lib/institutionalAccess.ts for where institutional access is
+  // actually checked.
   const { hasParentTier, loading: entitlementLoading } = useParentEntitlement();
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);

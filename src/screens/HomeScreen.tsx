@@ -22,6 +22,7 @@ import TeammatesModal from '../components/TeammatesModal';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import WorkoutBuilderModal from '../components/WorkoutBuilderModal';
 import { useParentEntitlement } from '../lib/purchases';
+import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
@@ -165,7 +166,29 @@ export default function HomeScreen() {
   // history stays paywalled here too (see the prop's comment in that
   // component for the bypass this closes).
   const [viewingOwnProfileFor, setViewingOwnProfileFor] = useState<{ id: string; name: string } | null>(null);
-  const { hasParentTier } = useParentEntitlement();
+  const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
+  // Institutional (Team/Program) access is per-player, not account-level —
+  // fetched fresh whenever the self-view profile changes, combined with the
+  // account's RevenueCat entitlement below. See src/lib/institutionalAccess.ts.
+  const [selfViewInstitutionalAccess, setSelfViewInstitutionalAccess] = useState(false);
+  useEffect(() => {
+    if (!viewingOwnProfileFor) {
+      setSelfViewInstitutionalAccess(false);
+      return;
+    }
+    let cancelled = false;
+    getInstitutionalAccessByPlayer([viewingOwnProfileFor.id])
+      .then((result) => {
+        if (!cancelled) setSelfViewInstitutionalAccess(result[viewingOwnProfileFor.id] === true);
+      })
+      .catch(() => {
+        if (!cancelled) setSelfViewInstitutionalAccess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewingOwnProfileFor]);
+  const hasParentTier = hasPurchasedParentTier || selfViewInstitutionalAccess;
   // Per-player "what to work on today" selection — null means the default
   // list below (this week's assignments or the full library) shows as-is.
   // A category or workout pick replaces it with a separate short "Suggested

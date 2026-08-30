@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
@@ -14,6 +14,7 @@ import { getUpcomingTeamEvents } from '../lib/teamEvents';
 import { getUpcomingScheduledDrills } from '../lib/schedule';
 import { Challenge, getChallengesForPlayer } from '../lib/challenges';
 import { useParentEntitlement } from '../lib/purchases';
+import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 
 type ScheduleItem = {
   key: string;
@@ -71,13 +72,35 @@ function daysLeft(endsAt: string | null): number {
 // only new summary rows that point at what already exists.
 export default function DashboardScreen() {
   const navigation = useNavigation();
-  const { hasParentTier } = useParentEntitlement();
+  const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<DashboardCard[]>([]);
   const [viewingProfileFor, setViewingProfileFor] = useState<{ id: string; name: string } | null>(null);
   const [teammatesForPlayerId, setTeammatesForPlayerId] = useState<string | null>(null);
+  // Institutional (Team/Program) access is per-player, not account-level —
+  // fetched fresh whenever the self-view profile changes, combined with the
+  // account's RevenueCat entitlement below. See src/lib/institutionalAccess.ts.
+  const [selfViewInstitutionalAccess, setSelfViewInstitutionalAccess] = useState(false);
+  useEffect(() => {
+    if (!viewingProfileFor) {
+      setSelfViewInstitutionalAccess(false);
+      return;
+    }
+    let cancelled = false;
+    getInstitutionalAccessByPlayer([viewingProfileFor.id])
+      .then((result) => {
+        if (!cancelled) setSelfViewInstitutionalAccess(result[viewingProfileFor.id] === true);
+      })
+      .catch(() => {
+        if (!cancelled) setSelfViewInstitutionalAccess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewingProfileFor]);
+  const hasParentTier = hasPurchasedParentTier || selfViewInstitutionalAccess;
 
   const load = useCallback(async () => {
     setError(null);

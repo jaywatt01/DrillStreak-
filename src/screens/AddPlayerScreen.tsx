@@ -14,6 +14,7 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
+import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
   addCustomDrill,
   addPlayer,
@@ -32,10 +33,16 @@ import { defaultLabel, getActiveSeason, renameSeason, Season, startInSeason, sta
 
 export default function AddPlayerScreen() {
   const navigation = useNavigation();
-  const { hasParentTier } = useParentEntitlement();
+  const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [players, setPlayers] = useState<Player[]>([]);
+  // True if ANY existing player is on a team with an active Team/Program
+  // plan — unlocks unlimited players for the whole account, same as
+  // parent_tier, without needing an individual RevenueCat purchase. See
+  // src/lib/institutionalAccess.ts.
+  const [hasInstitutionalAccess, setHasInstitutionalAccess] = useState(false);
+  const hasParentTier = hasPurchasedParentTier || hasInstitutionalAccess;
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -91,6 +98,10 @@ export default function AddPlayerScreen() {
       setSelectedPlayerId((current) =>
         current && myPlayers.some((p) => p.id === current) ? current : myPlayers[0]?.id ?? null
       );
+      const institutionalAccessByPlayer = await getInstitutionalAccessByPlayer(
+        myPlayers.map((p) => p.id)
+      );
+      setHasInstitutionalAccess(Object.values(institutionalAccessByPlayer).some(Boolean));
     } catch (e) {
       setPlayerError(e instanceof Error ? e.message : 'Failed to load players.');
     } finally {

@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView,
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
+import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import StreakCalendar from '../components/StreakCalendar';
 import {
   calculateStreak,
@@ -39,6 +40,12 @@ type PlayerProgress = {
   activeSeason: Season | null;
   visibleHistory: CompletionHistoryEntry[];
   hasMoreHistory: boolean;
+  // Combines the account's RevenueCat parent_tier with this specific
+  // player's institutional (Team/Program) access — see
+  // src/lib/institutionalAccess.ts. A real family could have one kid
+  // covered by a paid team and another kid not, so this is per-player,
+  // not the outer hasParentTier hook value.
+  hasFullAccess: boolean;
   allDates: string[];
   notes: PlayerNote[];
   freeThrows: ShootingComposite | null;
@@ -66,6 +73,9 @@ export default function ProgressScreen() {
     try {
       const players = await listMyPlayers();
       const weekStart = mondayOfThisWeek();
+      const institutionalAccessByPlayer = await getInstitutionalAccessByPlayer(
+        players.map((p) => p.id)
+      );
       const data = await Promise.all(
         players.map(async (player) => {
           const [history, notes, pastSeasons, activeSeason] = await Promise.all([
@@ -81,13 +91,15 @@ export default function ProgressScreen() {
           // recruiting-layer commitment depends on), this is the one
           // number that resets at a season boundary.
           const streakDates = activeSeason ? await getCompletionDates(player.id, activeSeason.id) : dates;
-          const visibleHistory = hasParentTier ? history : history.filter((h) => h.date >= weekStart);
+          const hasFullAccess = hasParentTier || institutionalAccessByPlayer[player.id] === true;
+          const visibleHistory = hasFullAccess ? history : history.filter((h) => h.date >= weekStart);
           return {
             player,
             streak: calculateStreak(streakDates),
             activeSeason,
             visibleHistory,
-            hasMoreHistory: !hasParentTier && history.length > visibleHistory.length,
+            hasFullAccess,
+            hasMoreHistory: !hasFullAccess && history.length > visibleHistory.length,
             allDates: dates,
             notes,
             freeThrows: computeMakesAttemptsTotal(visibleHistory, isFreeThrowDrill),
@@ -224,7 +236,7 @@ export default function ProgressScreen() {
       {progress.length === 0 ? (
         <Text style={styles.placeholder}>No players yet — add one from the Add a Player tab.</Text>
       ) : (
-        progress.map(({ player, streak, activeSeason, visibleHistory, hasMoreHistory, allDates, notes, freeThrows, shooting, repTallies, pastSeasons }) => (
+        progress.map(({ player, streak, activeSeason, visibleHistory, hasMoreHistory, hasFullAccess, allDates, notes, freeThrows, shooting, repTallies, pastSeasons }) => (
           <View key={player.id} style={styles.playerSection}>
             <Text style={styles.playerName}>{player.display_name}</Text>
             {formatPlayerBio(player) ? (
@@ -245,7 +257,7 @@ export default function ProgressScreen() {
                 onPress={() => openBreakdown(`${player.display_name} — Free Throws`, visibleHistory, isFreeThrowDrill)}
               >
                 <Text style={styles.streakLabel}>
-                  Free Throws {hasParentTier ? '(all-time)' : '(this week)'} · tap for detail
+                  Free Throws {hasFullAccess ? '(all-time)' : '(this week)'} · tap for detail
                 </Text>
                 <View style={styles.shootingRow}>
                   <Text style={styles.streakValue}>
@@ -266,7 +278,7 @@ export default function ProgressScreen() {
                 }
               >
                 <Text style={styles.streakLabel}>
-                  Shooting {hasParentTier ? '(all-time)' : '(this week)'} · tap for detail
+                  Shooting {hasFullAccess ? '(all-time)' : '(this week)'} · tap for detail
                 </Text>
                 <View style={styles.shootingRow}>
                   <Text style={styles.streakValue}>
@@ -282,7 +294,7 @@ export default function ProgressScreen() {
             {repTallies.length > 0 ? (
               <View style={styles.repTalliesCard}>
                 <Text style={styles.repTalliesLabel}>
-                  Total reps {hasParentTier ? '(all-time)' : '(this week)'}
+                  Total reps {hasFullAccess ? '(all-time)' : '(this week)'}
                 </Text>
                 {repTallies.map((t) => (
                   <View key={t.drillName} style={styles.repTallyRow}>
@@ -295,7 +307,7 @@ export default function ProgressScreen() {
 
             <StreakCalendar
               completedDates={allDates}
-              weeks={hasParentTier ? CALENDAR_WEEKS_FULL : CALENDAR_WEEKS_FREE}
+              weeks={hasFullAccess ? CALENDAR_WEEKS_FULL : CALENDAR_WEEKS_FREE}
             />
 
             {notes.length > 0 ? (
@@ -331,7 +343,7 @@ export default function ProgressScreen() {
             ) : null}
 
             <Text style={styles.historyLabel}>
-              {hasParentTier ? 'Full history' : 'This week'}
+              {hasFullAccess ? 'Full history' : 'This week'}
             </Text>
             {visibleHistory.length === 0 ? (
               <Text style={styles.placeholder}>Nothing logged yet.</Text>
