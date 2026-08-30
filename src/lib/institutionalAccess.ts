@@ -28,3 +28,27 @@ export async function getInstitutionalAccessByPlayer(
   );
   return Object.fromEntries(entries);
 }
+
+export type InstitutionalTeam = {
+  teamId: string;
+  teamName: string;
+  plan: 'team' | 'program';
+  expiresAt: string | null;
+  role: 'coach' | 'guardian';
+};
+
+// Powers the Account screen's Program section: invisible by default, since
+// signup is manual-invoice-only today (no self-serve flow yet) — it should
+// only appear for accounts actually connected (as coach or guardian) to a
+// team a school/district has paid for. Empty array = render nothing.
+export async function listMyInstitutionalTeams(): Promise<InstitutionalTeam[]> {
+  const { data, error } = await supabase.rpc('list_my_institutional_teams');
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    teamId: row.team_id,
+    teamName: row.team_name,
+    plan: row.plan,
+    expiresAt: row.expires_at,
+    role: row.role,
+  }));
+}

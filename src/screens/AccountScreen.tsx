@@ -27,6 +27,7 @@ import {
   restorePurchases,
   useParentEntitlement,
 } from '../lib/purchases';
+import { listMyInstitutionalTeams, InstitutionalTeam } from '../lib/institutionalAccess';
 
 export default function AccountScreen() {
   const [email, setEmail] = useState<string | null>(null);
@@ -49,6 +50,13 @@ export default function AccountScreen() {
   const [badgesByPlayer, setBadgesByPlayer] = useState<Record<string, { all: Badge[]; currentSeason: Badge[] }>>({});
   const [loadingBadges, setLoadingBadges] = useState(true);
   const [viewingBadgesFor, setViewingBadgesFor] = useState<Player | null>(null);
+  // Empty by default and stays empty for the vast majority of accounts —
+  // there's no self-serve signup for Team/Program plans, so this only
+  // populates once Jay manually marks a team's institutional_plan active
+  // via the Supabase SQL Editor after an invoice is paid. Render nothing
+  // while it's empty, per Jay's explicit ask not to show this section
+  // "all of the time."
+  const [institutionalTeams, setInstitutionalTeams] = useState<InstitutionalTeam[]>([]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
@@ -67,6 +75,9 @@ export default function AccountScreen() {
         setBadgesByPlayer(Object.fromEntries(entries));
       })
       .finally(() => setLoadingBadges(false));
+    listMyInstitutionalTeams()
+      .then(setInstitutionalTeams)
+      .catch(() => setInstitutionalTeams([]));
   }, []);
 
   // Soft check, not a hard gate: a display_name is one value per account,
@@ -319,6 +330,26 @@ export default function AccountScreen() {
           </Text>
         ) : null}
       </View>
+
+      {institutionalTeams.map((team) => (
+        <View key={team.teamId} style={[styles.tierCard, styles.tierCardActive]}>
+          <Text style={styles.tierLabel}>Program</Text>
+          <Text style={styles.tierValue}>{team.teamName}</Text>
+          <Text style={styles.tierBody}>
+            {team.plan === 'program' ? 'Program plan' : 'Team plan'} — active
+            {team.role === 'coach' ? ' for your team' : ' for your family'}.
+            {team.expiresAt
+              ? ` Renews ${new Date(team.expiresAt).toLocaleDateString(undefined, {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}.`
+              : ''}{' '}
+            Full history and unlimited linked players are unlocked for every player on this
+            roster — no separate Parent membership needed.
+          </Text>
+        </View>
+      ))}
 
       <Pressable style={styles.signOutButton} onPress={() => supabase.auth.signOut()}>
         <Text style={styles.signOutText}>Sign out</Text>
