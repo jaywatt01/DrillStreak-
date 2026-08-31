@@ -131,6 +131,18 @@ create table teams (
 -- grants — re-tested the same way afterward (name updates succeeded under
 -- the coach's own role/RLS context, institutional_plan did not) before
 -- calling this closed.
+--
+-- Second correction (2026-08-31): the auth.role() = 'service_role' check
+-- alone also silently blocked Jay's own manual updates via the Supabase
+-- Dashboard SQL Editor — that connection runs as plain Postgres superuser
+-- (current_user = 'postgres') with no PostgREST/JWT context at all, so
+-- auth.role() reads NULL there, not 'service_role'. Caught by having Jay
+-- run `select current_user, auth.role();` in the SQL Editor and getting
+-- back ('postgres', NULL) before trusting the "elevated connection = the
+-- SQL Editor" claim in the comment above, which was wrong as originally
+-- written. Added the current_user = 'postgres' branch so both the
+-- MCP/service-role path and Jay's own manual SQL Editor path work, while
+-- the app's `authenticated` role still matches neither.
 create or replace function prevent_client_institutional_plan_write()
 returns trigger
 language plpgsql
@@ -140,7 +152,7 @@ as $$
 begin
   if (new.institutional_plan is distinct from old.institutional_plan)
      or (new.institutional_plan_expires_at is distinct from old.institutional_plan_expires_at) then
-    if auth.role() is distinct from 'service_role' then
+    if auth.role() is distinct from 'service_role' and current_user <> 'postgres' then
       raise exception 'institutional_plan can only be changed via an elevated connection (the Supabase SQL Editor), not the app.';
     end if;
   end if;
@@ -3388,3 +3400,43 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function list_my_institutional_teams() from public;
 -- revoke all on function list_my_institutional_teams() from anon;
 -- grant execute on function list_my_institutional_teams() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-08-31) — second, real
+-- correction to prevent_client_institutional_plan_write() above. The
+-- auth.role() = 'service_role' check alone also silently blocked Jay's own
+-- manual writes via the Supabase Dashboard SQL Editor: that connection is a
+-- plain Postgres superuser session (current_user = 'postgres'), with no
+-- PostgREST/JWT context at all, so auth.role() reads NULL there. Caught by
+-- having Jay run `select current_user, auth.role();` in the SQL Editor and
+-- getting back ('postgres', NULL) — not assumed from the earlier in-code
+-- comment claiming "elevated connection = the SQL Editor," which was wrong
+-- as originally written. CONFIRMED APPLIED AND RE-TESTED: applied via the
+-- SQL Editor itself (proving current_user = 'postgres' now passes), then
+-- used to flip a real team (PMF- Positive Male Figures) to
+-- institutional_plan = 'program', confirmed via the UPDATE's own RETURNING
+-- clause and again live in the app — Program section appeared, full
+-- history/unlimited players unlocked for that team's players.
+-- ---------------------------------------------------------------------------
+-- create or replace function prevent_client_institutional_plan_write()
+-- returns trigger
+-- language plpgsql
+-- security definer
+-- set search_path = public
+-- as $$
+-- begin
+--   if (new.institutional_plan is distinct from old.institutional_plan)
+--      or (new.institutional_plan_expires_at is distinct from old.institutional_plan_expires_at) then
+--     if auth.role() is distinct from 'service_role' and current_user <> 'postgres' then
+--       raise exception 'institutional_plan can only be changed via an elevated connection (the Supabase SQL Editor), not the app.';
+--     end if;
+--   end if;
+--   return new;
+-- end;
+-- $$;
+--
+-- drop trigger if exists teams_protect_institutional_plan on teams;
+-- create trigger teams_protect_institutional_plan
+-- before update on teams
+-- for each row
+-- execute function prevent_client_institutional_plan_write();
