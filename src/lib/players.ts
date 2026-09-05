@@ -490,6 +490,17 @@ function walkStreakWithGrace(sortedDescendingDates: string[]): { streak: number;
   const [mostRecentYear, mostRecentMonth, mostRecentDay] = mostRecent.split('-').map(Number);
   const cursor = new Date(mostRecentYear, mostRecentMonth - 1, mostRecentDay);
 
+  // Grace can only forgive a gap BETWEEN two real logged days — never a
+  // "miss" before the player's very first-ever completion, which isn't a
+  // miss at all (the player hadn't started yet). Real bug caught Sept 5,
+  // 2026 on a brand-new test player: a single completion logged today was
+  // walking back to "yesterday," finding no data (because the player
+  // didn't exist yesterday), and spending a grace day on it — reporting
+  // streak forgiveness for a day nobody could possibly have logged.
+  const earliest = sortedDescendingDates[sortedDescendingDates.length - 1];
+  const [earliestYear, earliestMonth, earliestDay] = earliest.split('-').map(Number);
+  const earliestDate = new Date(earliestYear, earliestMonth - 1, earliestDay);
+
   let streak = 0;
   let graceUsed = false;
   let lastGraceDate: Date | null = null;
@@ -501,6 +512,7 @@ function walkStreakWithGrace(sortedDescendingDates: string[]): { streak: number;
       cursor.setDate(cursor.getDate() - 1);
       continue;
     }
+    if (cursor <= earliestDate) break;
     const graceAvailable = !lastGraceDate || daysBetween(cursor, lastGraceDate) >= 7;
     if (graceAvailable) {
       lastGraceDate = new Date(cursor);
