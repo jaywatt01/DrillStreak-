@@ -518,6 +518,30 @@ create policy assignments_access on assignments
     or (player_id is not null and is_player_owner_or_guardian(assignments.player_id, auth.uid()))
   );
 
+-- Real bug found and fixed Sept 5, 2026, while scoping the per-player
+-- drill assignment feature (not while testing the feature itself — the
+-- gap was discovered by reading this policy directly): the policy above
+-- has NO clause letting a guardian read a team-wide (player_id is null)
+-- assignment row at all — only the coach can. This meant the entire
+-- "coach assigns a drill to the whole team, every family sees it" loop
+-- has never actually worked for any guardian who isn't also the coach,
+-- on any platform, since assignments existed. A separate, additive,
+-- SELECT-only policy (deliberately not folded into assignments_access
+-- above, so it can't accidentally grant a guardian write access to a
+-- team-wide row) — verified live both directions: a real guardian sees
+-- the row, an unrelated caller still sees nothing.
+create policy assignments_team_wide_guardian_read on assignments
+  for select
+  using (
+    player_id is null
+    and team_id is not null
+    and exists (
+      select 1 from team_memberships tm
+      where tm.team_id = assignments.team_id
+        and is_player_owner_or_guardian(tm.player_id, auth.uid())
+    )
+  );
+
 -- completions: writable by the player's owner/guardian; readable by them
 -- AND by the coach of any team the player is on (accountability is the
 -- whole point — coach sees real logs regardless of who defined the drill)
@@ -3505,3 +3529,31 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- before update on teams
 -- for each row
 -- execute function prevent_client_institutional_plan_write();
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-09-05) -- real bug
+-- found while scoping the per-player drill assignment feature (found by
+-- reading the RLS policy directly, not by testing the feature itself):
+-- assignments_access had no clause letting a guardian read a team-wide
+-- (player_id is null) assignment row at all -- only the coach could. The
+-- entire "coach assigns a drill to the whole team, every family sees it"
+-- loop has never actually worked for any guardian who isn't also the
+-- coach, on any platform, since assignments existed. Fixed additively
+-- with a separate SELECT-only policy (deliberately not folded into
+-- assignments_access, so it can't accidentally grant a guardian write
+-- access to a team-wide row). CONFIRMED APPLIED AND VERIFIED LIVE: a real
+-- guardian (info@uplevate.co, on PMF- Positive Male Figures) sees the
+-- team's real Aug 31 assignment row after the fix (0 rows before), an
+-- unrelated random caller still sees nothing.
+-- ---------------------------------------------------------------------------
+-- create policy assignments_team_wide_guardian_read on assignments
+-- for select
+-- using (
+--   player_id is null
+--   and team_id is not null
+--   and exists (
+--     select 1 from team_memberships tm
+--     where tm.team_id = assignments.team_id
+--       and is_player_owner_or_guardian(tm.player_id, auth.uid())
+--   )
+-- );
