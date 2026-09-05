@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import Purchases, { CustomerInfo } from 'react-native-purchases';
 
 // "parent_tier" must match the entitlement identifier configured in the
@@ -9,7 +10,19 @@ import Purchases, { CustomerInfo } from 'react-native-purchases';
 // (a coach creating a team is how parents/players even find the app).
 export const PARENT_ENTITLEMENT_ID = 'parent_tier';
 
-const REVENUECAT_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY;
+// RevenueCat issues a separate API key per store under one project (an
+// Apple App Store app and a Google Play app each get their own key), so
+// this needs to pick the right one per platform rather than assuming one
+// key covers both. iOS keeps the existing env var unchanged — nothing
+// changes for the app as it ships today. Android reads a new, separate
+// var that stays unset (and the SDK no-ops, same as the existing "not
+// configured yet" behavior) until Jay adds a Google Play app in the
+// RevenueCat dashboard and sets EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID.
+const REVENUECAT_API_KEY = Platform.select({
+  ios: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY,
+  android: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID,
+  default: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY,
+});
 
 let configured = false;
 
