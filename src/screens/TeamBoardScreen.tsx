@@ -432,7 +432,15 @@ export default function TeamBoardScreen() {
       {view === 'messages' ? (
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // Real bug caught on the first Android device test, Sept 5,
+          // 2026: leaving `behavior` undefined on Android relied entirely
+          // on the OS's own resize handling, which doesn't actually avoid
+          // the keyboard for this ScrollView+composer layout — the
+          // composer input was visually covered while typing (input still
+          // worked, just invisible). 'height' is React Native's standard
+          // Android-specific KeyboardAvoidingView behavior, distinct from
+          // iOS's 'padding'.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={90}
         >
           {contacts.length > 0 ? (
