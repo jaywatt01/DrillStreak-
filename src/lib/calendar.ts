@@ -37,11 +37,15 @@ async function getTargetCalendarId(): Promise<string> {
   return writable.id;
 }
 
+// Returns the device's own calendar event id — callers that want to be
+// able to delete this specific event later (see deleteScheduledDrill in
+// lib/schedule.ts) need to hold onto it themselves; expo-calendar has no
+// way to look an event back up by title/time after the fact.
 export async function addDrillToCalendar(
   drillName: string,
   startDate: Date,
   durationMinutes: number
-): Promise<void> {
+): Promise<string> {
   const granted = await requestCalendarWriteAccess();
   if (!granted) {
     throw new Error('Calendar permission was not granted.');
@@ -51,9 +55,19 @@ export async function addDrillToCalendar(
 
   const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
 
-  await Calendar.createEventAsync(calendarId, {
+  return Calendar.createEventAsync(calendarId, {
     title: drillName,
     startDate,
     endDate,
   });
+}
+
+export async function removeDrillFromCalendar(calendarEventId: string): Promise<void> {
+  try {
+    await Calendar.deleteEventAsync(calendarEventId);
+  } catch {
+    // Already gone from the device's Calendar app (e.g. the user deleted
+    // it manually themselves) — the end state we wanted either way, same
+    // reasoning as syncDeletedTeamEventsFromCalendar in lib/teamEvents.ts.
+  }
 }

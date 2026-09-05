@@ -1250,6 +1250,38 @@ revoke all on function list_my_teams() from public;
 revoke all on function list_my_teams() from anon;
 grant execute on function list_my_teams() to authenticated;
 
+-- list_teams_for_player: the team(s) a specific player belongs to, with
+-- names. Real bug found and fixed Sept 5, 2026, first Android device
+-- test: the app's src/lib/team.ts used to do this as a plain client-side
+-- query embedding `teams(id, name)` off of team_memberships. That embed
+-- is silently RLS-blocked for any caller who isn't the team's coach --
+-- `teams` has exactly one policy (teams_coach_access, coach-only), and
+-- PostgREST returns `teams: null` on an RLS-blocked embed rather than
+-- erroring -- so a guardian (parent) account always got an empty team
+-- list here, on every platform, since this query was written. Never
+-- caught before because this exact path had only ever been tested as a
+-- coach account. Fixed with this RPC (same security-definer,
+-- re-check-ownership pattern as list_my_teams/list_my_institutional_teams
+-- above), verified live for both a real guardian (returns the team) and
+-- an unrelated caller (returns nothing).
+create or replace function list_teams_for_player(p_player_id uuid)
+returns table(team_id uuid, team_name text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.id, t.name
+  from team_memberships tm
+  join teams t on t.id = tm.team_id
+  where tm.player_id = p_player_id
+    and is_player_owner_or_guardian(p_player_id, auth.uid());
+$$;
+
+revoke all on function list_teams_for_player(uuid) from public;
+revoke all on function list_teams_for_player(uuid) from anon;
+grant execute on function list_teams_for_player(uuid) to authenticated;
+
 -- list_my_institutional_teams: every team a caller can reach (same
 -- coach-or-guardian union shape as list_my_teams above) that ALSO
 -- currently has an active Team/Program institutional plan. Powers the
@@ -3400,6 +3432,39 @@ insert into drills (name, category, is_default, estimated_minutes) values
 -- revoke all on function list_my_institutional_teams() from public;
 -- revoke all on function list_my_institutional_teams() from anon;
 -- grant execute on function list_my_institutional_teams() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-09-05) —
+-- list_teams_for_player(). Real bug found on the first Android device
+-- test: getPlayerTeams() in src/lib/team.ts did a plain client-side query
+-- embedding `teams(id, name)` off of team_memberships. `teams` has
+-- exactly one RLS policy (teams_coach_access, coach-only) -- PostgREST
+-- silently returns `teams: null` on an RLS-blocked embed rather than
+-- erroring, so a guardian (parent) account always got an empty team list
+-- from this query, on every platform, since it was written -- never
+-- caught because this path had only ever been tested as a coach account.
+-- CONFIRMED APPLIED AND VERIFIED LIVE: simulated the real guardian's role
+-- (returns the team correctly) and an unrelated random caller (returns
+-- nothing), before updating the app code to call this instead of the
+-- broken raw embed.
+-- ---------------------------------------------------------------------------
+-- create or replace function list_teams_for_player(p_player_id uuid)
+-- returns table(team_id uuid, team_name text)
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select t.id, t.name
+--   from team_memberships tm
+--   join teams t on t.id = tm.team_id
+--   where tm.player_id = p_player_id
+--     and is_player_owner_or_guardian(p_player_id, auth.uid());
+-- $$;
+--
+-- revoke all on function list_teams_for_player(uuid) from public;
+-- revoke all on function list_teams_for_player(uuid) from anon;
+-- grant execute on function list_teams_for_player(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Migration for the already-deployed database (2026-08-31) — second, real
