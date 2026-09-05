@@ -5,6 +5,9 @@ Everything below is ready to paste into App Store Connect except screenshots (ne
 ## App name
 DrillStreak
 
+## Standing tagline (added Sep 5, 2026 — use everywhere going forward)
+**"Start the streak that changes your game."** — Jay's explicit call: this is now the tagline for all DrillStreak materials and marketing, not just the marketing site (where it was already live at the bottom of the page and is what prompted this). Use it as the lead line anywhere there's room — promotional text, feature graphics, social, future ads. **Doesn't fit Apple's 30-char Subtitle field verbatim** (it's ~40 characters) — Subtitle stays the shorter, mechanic-descriptive "Assign drills. Track streaks." for that one specific constrained field; the new tagline is the brand-voice line everywhere else.
+
 ## Subtitle (30 char max)
 Assign drills. Track streaks.
 
@@ -13,7 +16,7 @@ Primary: Health & Fitness
 Secondary: Sports
 
 ## Promotional text (170 char max, editable anytime without review)
-Every rep, verified — a real record of the work that gets athletes noticed. Free for coaches, forever. No more "I did like 200 and something" self-reports.
+Start the streak that changes your game. Every rep, verified — a real record of the work that gets athletes noticed. Free for coaches, forever.
 
 ## Description
 Every extra rep is a step toward something — a starting spot, a scholarship look, a coach who notices. DrillStreak turns that work into a verified, dated record instead of a guess.
