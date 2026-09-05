@@ -41,7 +41,7 @@ import {
   WeeklyDrill,
 } from '../lib/players';
 import { addDrillToCalendar } from '../lib/calendar';
-import { recordScheduledDrill } from '../lib/schedule';
+import { recordScheduledDrill, recordScheduledDrillCalendarEvent } from '../lib/schedule';
 import { mondayOfThisWeek } from '../lib/date';
 import { getPlayerTeams, getPromptForResultsForPlayer } from '../lib/team';
 import { getActiveSeason, Season } from '../lib/seasons';
@@ -650,8 +650,9 @@ export default function HomeScreen() {
     const { playerId, drill } = schedulingFor;
     setSchedulingFor(null);
     setAddingToCalendarId(drill.id);
+    let calendarEventId: string | null = null;
     try {
-      await addDrillToCalendar(drill.name, pickerTime, minutes);
+      calendarEventId = await addDrillToCalendar(drill.name, pickerTime, minutes);
       Alert.alert('Added to calendar', `"${drill.name}" was added to your calendar.`);
     } catch (e) {
       Alert.alert(
@@ -671,7 +672,14 @@ export default function HomeScreen() {
     // calendar), a second error about an in-app mirror they didn't
     // explicitly request would just be noise.
     try {
-      await recordScheduledDrill(playerId, drill.name, pickerTime, minutes);
+      const scheduledDrillId = await recordScheduledDrill(playerId, drill.name, pickerTime, minutes);
+      // Remembers which calendar event this row created, so deleting it
+      // later (Dashboard's "Upcoming" list) can clean up the calendar too
+      // instead of leaving an orphaned event only removable from the
+      // phone's own Calendar app — real gap Jay caught Sept 5, 2026.
+      if (calendarEventId) {
+        await recordScheduledDrillCalendarEvent(scheduledDrillId, calendarEventId);
+      }
     } catch {
       // Non-fatal — see comment above.
     }

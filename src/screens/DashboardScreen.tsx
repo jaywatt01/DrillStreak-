@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
@@ -11,7 +11,7 @@ import { getActiveSeason, Season } from '../lib/seasons';
 import { Badge, filterCurrentBadges, listBadges } from '../lib/badges';
 import { getPlayerTeams } from '../lib/team';
 import { getUpcomingTeamEvents } from '../lib/teamEvents';
-import { getUpcomingScheduledDrills } from '../lib/schedule';
+import { deleteScheduledDrill, getUpcomingScheduledDrills } from '../lib/schedule';
 import { Challenge, getChallengesForPlayer } from '../lib/challenges';
 import { useParentEntitlement } from '../lib/purchases';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
@@ -21,6 +21,11 @@ type ScheduleItem = {
   title: string;
   subtitle: string;
   when: Date;
+  // Set only for a player-scheduled drill, never a team event — team
+  // events are coach-managed and deleted from Team Board, not here. Lets
+  // the row render a delete affordance only where it's actually this
+  // screen's job to offer one.
+  scheduledDrillId?: string;
 };
 
 type DashboardCard = {
@@ -135,6 +140,7 @@ export default function DashboardScreen() {
               title: d.drillName,
               subtitle: `Drill · ${d.durationMinutes} min`,
               when: new Date(d.scheduledAt),
+              scheduledDrillId: d.id,
             })),
             ...teamEventLists.flat().map((e) => ({
               key: `event-${e.id}`,
@@ -178,6 +184,29 @@ export default function DashboardScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     load();
+  };
+
+  // Real gap Jay caught testing on Android, Sept 5, 2026: a scheduled
+  // drill could only ever be removed by deleting it from the phone's
+  // native Calendar app directly, with no way to cancel it from within
+  // DrillStreak at all. Confirms first, since this also cancels the
+  // calendar event on whichever device originally scheduled it.
+  const handleDeleteScheduledDrill = (scheduledDrillId: string, drillName: string) => {
+    Alert.alert('Cancel this drill?', `"${drillName}" will be removed from your schedule and calendar.`, [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Cancel drill',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteScheduledDrill(scheduledDrillId);
+            load();
+          } catch (e) {
+            Alert.alert('Could not cancel', e instanceof Error ? e.message : 'Something went wrong.');
+          }
+        },
+      },
+    ]);
   };
 
   if (loading) {
@@ -272,6 +301,15 @@ export default function DashboardScreen() {
                         <Text style={styles.scheduleSubtitle}>{item.subtitle}</Text>
                       </View>
                       <Text style={styles.scheduleWhen}>{formatScheduleWhen(item.when)}</Text>
+                      {item.scheduledDrillId ? (
+                        <Pressable
+                          onPress={() => handleDeleteScheduledDrill(item.scheduledDrillId!, item.title)}
+                          hitSlop={8}
+                          style={styles.scheduleDeleteButton}
+                        >
+                          <Text style={styles.scheduleDeleteText}>✕</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   ))}
                 </View>
@@ -334,4 +372,6 @@ const styles = StyleSheet.create({
   scheduleTitle: { fontSize: 13, fontWeight: '600', color: colors.text },
   scheduleSubtitle: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   scheduleWhen: { fontSize: 12, fontWeight: '600', color: colors.primary },
+  scheduleDeleteButton: { paddingHorizontal: 4, paddingVertical: 4 },
+  scheduleDeleteText: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
 });

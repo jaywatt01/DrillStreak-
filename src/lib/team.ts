@@ -77,22 +77,30 @@ export async function setPromptForResults(teamId: string, value: boolean): Promi
 }
 
 // The team(s) this player belongs to, with names — for the badge-share
-// picker, which needs to know where "share to team" can actually post.
-// Direct query against team_memberships is fine here (not an RPC like
-// get_teammates needs) because team_memberships_access already grants an
-// owner/guardian read access to their OWN player's membership rows —
-// this only ever asks about a player the caller already owns/guards.
+// picker (and the Home dashboard's "which team is this player on" row),
+// which needs to know where "share to team" can actually post.
+//
+// Real bug found and fixed Sept 5, 2026, first Android device test: this
+// used to be a direct client-side query embedding `teams(id, name)`.
+// team_memberships_access does grant an owner/guardian read on their OWN
+// player's membership row, but `teams` itself has its own separate RLS
+// policy (teams_coach_access, coach-only) — PostgREST silently returns
+// `teams: null` on an RLS-blocked embed rather than erroring, so a
+// guardian (not the coach) always got an empty team list here, on every
+// platform, since this function was written. Never caught before because
+// this exact path had only ever been tested as a coach account, which
+// bypasses the gap via the OTHER half of team_memberships_access's OR
+// clause. Fixed with an RPC (same security-definer, re-check-ownership
+// pattern as list_my_teams/list_my_institutional_teams) instead of a raw
+// embedded select, verified live for both a real guardian (returns the
+// team) and an unrelated caller (returns nothing).
 export async function getPlayerTeams(playerId: string): Promise<{ id: string; name: string }[]> {
-  const { data, error } = await supabase
-    .from('team_memberships')
-    .select('teams(id, name)')
-    .eq('player_id', playerId);
+  const { data, error } = await supabase.rpc('list_teams_for_player', { p_player_id: playerId });
   if (error) throw error;
-  return (data ?? [])
-    .flatMap((row) => {
-      const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
-      return team ? [{ id: team.id as string, name: team.name as string }] : [];
-    });
+  return (data ?? []).map((row: { team_id: string; team_name: string }) => ({
+    id: row.team_id,
+    name: row.team_name,
+  }));
 }
 
 export async function getRoster(teamId: string): Promise<RosterPlayer[]> {
