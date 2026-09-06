@@ -513,8 +513,24 @@ function walkStreakWithGrace(sortedDescendingDates: string[]): { streak: number;
       continue;
     }
     if (cursor <= earliestDate) break;
+    // Real bug found and fixed Sept 6, 2026, on real (not synthetic) data —
+    // a player who logs roughly once a week, e.g. every ~7-9 days: the walk
+    // used to spend a grace on the day right after their one real log, then
+    // immediately dead-end (the day before THAT is empty too, and the 7-day
+    // cooldown blocks a second grace), reporting "grace used" every single
+    // week for a gap the grace never actually bridged to anything. A grace
+    // is only real if it reconnects to another logged day one step further
+    // back — otherwise it's a phantom, not a forgiven single miss. Peeking
+    // one more day back before committing the grace is what the earlier
+    // Sept 5 fix (the earliestDate check above) didn't cover — that one
+    // stopped grace from walking past the player's first-ever day; this
+    // stops grace from being "spent" on a gap that was never going to
+    // reconnect to real history at all.
     const graceAvailable = !lastGraceDate || daysBetween(cursor, lastGraceDate) >= 7;
-    if (graceAvailable) {
+    const peekCursor = new Date(cursor);
+    peekCursor.setDate(peekCursor.getDate() - 1);
+    const bridgesToRealDay = completed.has(localDateString(peekCursor));
+    if (graceAvailable && bridgesToRealDay) {
       lastGraceDate = new Date(cursor);
       graceUsed = true;
       cursor.setDate(cursor.getDate() - 1);
