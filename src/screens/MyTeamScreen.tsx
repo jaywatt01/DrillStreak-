@@ -22,6 +22,7 @@ import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import WeekDotsRow from '../components/WeekDotsRow';
 import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
 import {
+  assignDrillToPlayer,
   assignDrillToTeam,
   AssignedDrill,
   createTeam,
@@ -44,6 +45,14 @@ import {
   updateAssignmentSchedule,
 } from '../lib/team';
 import { startInSeason, startOffseason, undoSeasonSwitch } from '../lib/seasons';
+
+// How many roster-activity rows show on the main screen before "View all"
+// is needed — real scaling problem Jay caught, Sept 5, 2026: with 15
+// players logging drills weekly, this feed grew unbounded and pushed
+// everything else on the tab down with it. Same fix shape applies to the
+// roster list and the drill library below — collapse to a summary on the
+// main screen, full detail in a popup.
+const ACTIVITY_PREVIEW_COUNT = 5;
 
 // "HH:MM:SS" (Postgres `time`) <-> a plain Date used just to drive the
 // picker UI. Only the hour/minute round-trip through the database.
@@ -95,6 +104,18 @@ export default function MyTeamScreen() {
   const [loadingNote, setLoadingNote] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [statsPlayer, setStatsPlayer] = useState<RosterPlayer | null>(null);
+
+  // Popup state for the redesigned Roster/Drills/Activity sections —
+  // real scaling fix Jay asked for, Sept 5, 2026: none of these render
+  // inline on the main screen anymore once a team has real size.
+  const [showRosterModal, setShowRosterModal] = useState(false);
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  // Two-step assign flow: null = closed; a Drill = picking who ("Whole
+  // Team" or specific players) for that drill.
+  const [browsingDrills, setBrowsingDrills] = useState(false);
+  const [pickingTargetFor, setPickingTargetFor] = useState<Drill | null>(null);
+  const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
+  const [assigning, setAssigning] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -395,21 +416,66 @@ export default function MyTeamScreen() {
     }
   };
 
-  const handleToggleDrill = async (drill: Drill) => {
-    const existing = assignedDrills.find((d) => d.id === drill.id);
-    setTogglingDrillId(drill.id);
+  // Opens the "who is this for" step, one drill at a time — Jay's exact
+  // ask, Sept 5, 2026: a coach picks a drill, then chooses Whole Team or
+  // specific players, "in addition to" team-wide, not instead of.
+  const openTargetPicker = (drill: Drill) => {
+    setBrowsingDrills(false);
+    setSelectedPlayerIds(new Set());
+    setPickingTargetFor(drill);
+  };
+
+  const togglePlayerSelection = (playerId: string) => {
+    setSelectedPlayerIds((current) => {
+      const next = new Set(current);
+      if (next.has(playerId)) next.delete(playerId);
+      else next.add(playerId);
+      return next;
+    });
+  };
+
+  const handleAssignToTeam = async () => {
+    if (!team || !pickingTargetFor) return;
+    setAssigning(true);
     setError(null);
     try {
-      if (existing) {
-        await unassignDrill(existing.assignmentId);
-      } else if (team) {
-        await assignDrillToTeam(team.id, drill.id);
-      }
-      if (team) {
-        setAssignedDrills(await getWeeklyTeamAssignments(team.id));
-      }
+      await assignDrillToTeam(team.id, pickingTargetFor.id);
+      setAssignedDrills(await getWeeklyTeamAssignments(team.id));
+      setPickingTargetFor(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update assignment.');
+      setError(e instanceof Error ? e.message : 'Failed to assign drill.');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const handleAssignToSelectedPlayers = async () => {
+    if (!team || !pickingTargetFor || selectedPlayerIds.size === 0) return;
+    setAssigning(true);
+    setError(null);
+    try {
+      await Promise.all(
+        Array.from(selectedPlayerIds).map((playerId) =>
+          assignDrillToPlayer(team.id, playerId, pickingTargetFor.id)
+        )
+      );
+      setAssignedDrills(await getWeeklyTeamAssignments(team.id));
+      setPickingTargetFor(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to assign drill.');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const handleUnassign = async (assignmentId: string) => {
+    setTogglingDrillId(assignmentId);
+    setError(null);
+    try {
+      await unassignDrill(assignmentId);
+      if (team) setAssignedDrills(await getWeeklyTeamAssignments(team.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to remove assignment.');
     } finally {
       setTogglingDrillId(null);
     }
@@ -576,114 +642,85 @@ export default function MyTeamScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Roster ({roster.length})</Text>
-          {roster.length === 0 ? (
+          {/* Real scaling fix, Sept 5, 2026: Roster, Drills, and Roster
+              Activity used to render in full on this one screen — fine at
+              a handful of players, a wall of scrolling at 15+. Each now
+              collapses to a compact summary here, full detail in its own
+              popup, same "compact card, tap for detail" shape the Home
+              tab already uses. */}
+          <Pressable style={styles.summaryCard} onPress={() => setShowRosterModal(true)}>
+            <View style={styles.summaryHeaderRow}>
+              <Text style={styles.sectionTitle}>Roster ({roster.length})</Text>
+              <Text style={styles.summaryLink}>View →</Text>
+            </View>
             <Text style={styles.placeholder}>
-              No players yet — share your invite code to get your roster started.
+              {roster.length === 0
+                ? 'No players yet — share your invite code to get started.'
+                : `${rosterCompletions.length > 0 ? new Set(rosterCompletions.map((c) => c.playerId)).size : 0} of ${roster.length} logged something this week.`}
             </Text>
-          ) : (
-            <>
-              <Text style={styles.placeholder}>
-                Green dots show who logged something this week, Mon-Sun. Tap a row (or Stats) for
-                a player's full streak/shooting/history. Tap Note to add or edit your note about
-                them. Long-press to remove them from the roster.
-              </Text>
-              {roster.map((p) => {
-                const datesThisWeek = rosterCompletions.filter((c) => c.playerId === p.id).map((c) => c.date);
+          </Pressable>
+
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryHeaderRow}>
+              <Text style={styles.sectionTitle}>This week's assignments ({assignedDrills.length})</Text>
+              <Pressable onPress={() => setBrowsingDrills(true)}>
+                <Text style={styles.summaryLink}>+ Assign</Text>
+              </Pressable>
+            </View>
+            {assignedDrills.length === 0 ? (
+              <Text style={styles.placeholder}>Nothing assigned yet this week.</Text>
+            ) : (
+              assignedDrills.map((a) => {
+                const scheduleLabel = formatScheduleLabel(a.scheduledTime, a.durationMinutes);
                 return (
-                  <Pressable
-                    key={p.id}
-                    style={styles.rosterRow}
-                    onPress={() => setStatsPlayer(p)}
-                    onLongPress={() => handleLongPressRosterPlayer(p)}
-                  >
-                    <View style={styles.rosterTopRow}>
-                      <Text style={styles.rosterName}>{p.display_name}</Text>
-                      <View style={styles.rosterLinks}>
-                        <Text style={styles.statsLink}>Stats</Text>
-                        <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
-                          <Text style={styles.noteLink}>Note</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() =>
-                            (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
-                              teamId: team.id,
-                              threadUserId: p.contactUserId,
-                              view: 'messages',
-                            })
-                          }
-                          hitSlop={8}
-                        >
-                          <Text style={styles.messageLink}>Message</Text>
-                        </Pressable>
+                  <View key={a.assignmentId} style={styles.drillRow}>
+                    <Pressable style={styles.drillRowMain} onPress={() => openScheduler(a)}>
+                      <View style={styles.drillRowText}>
+                        <Text style={styles.drillName}>{a.name}</Text>
+                        <Text style={styles.drillCategory}>
+                          {a.playerId ? a.playerName : 'Whole team'}
+                          {scheduleLabel ? ` · ⏰ ${scheduleLabel}` : ' · ⏰ Set suggested time'}
+                        </Text>
                       </View>
-                    </View>
-                    <WeekDotsRow completedDates={datesThisWeek} />
-                  </Pressable>
-                );
-              })}
-            </>
-          )}
-
-          <Text style={styles.sectionTitle}>This week's drills</Text>
-          <Text style={styles.placeholder}>
-            Tap a drill to assign it to the whole team for this week. Tap
-            again to remove it.
-          </Text>
-          {availableDrills.map((drill) => {
-            const assignedDrill = assignedDrills.find((d) => d.id === drill.id);
-            const assigned = assignedDrill != null;
-            const scheduleLabel = assignedDrill
-              ? formatScheduleLabel(assignedDrill.scheduledTime, assignedDrill.durationMinutes)
-              : null;
-            return (
-              <View key={drill.id} style={[styles.drillRow, assigned && styles.drillRowAssigned]}>
-                <Pressable
-                  style={styles.drillRowMain}
-                  onPress={() => handleToggleDrill(drill)}
-                  disabled={togglingDrillId === drill.id}
-                >
-                  <View style={styles.drillRowText}>
-                    <Text style={styles.drillName}>{drill.name}</Text>
-                    {drill.category ? (
-                      <Text style={styles.drillCategory}>{drill.category}</Text>
-                    ) : null}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleUnassign(a.assignmentId)}
+                      hitSlop={8}
+                      disabled={togglingDrillId === a.assignmentId}
+                    >
+                      {togglingDrillId === a.assignmentId ? (
+                        <ActivityIndicator color={colors.primary} size="small" />
+                      ) : (
+                        <Text style={styles.removeAssignmentText}>Remove</Text>
+                      )}
+                    </Pressable>
                   </View>
-                  {togglingDrillId === drill.id ? (
-                    <ActivityIndicator color={colors.primary} />
-                  ) : (
-                    <Text style={assigned ? styles.assignedTag : styles.assignTag}>
-                      {assigned ? '✓ Assigned' : 'Assign'}
-                    </Text>
-                  )}
-                </Pressable>
-                {assignedDrill ? (
-                  <Pressable onPress={() => openScheduler(assignedDrill)} hitSlop={8}>
-                    <Text style={styles.scheduleLink}>
-                      {scheduleLabel ? `⏰ ${scheduleLabel}` : '⏰ Set suggested time'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            );
-          })}
+                );
+              })
+            )}
+          </View>
 
-          <Text style={styles.sectionTitle}>Roster activity this week</Text>
-          {rosterCompletions.length === 0 ? (
-            <Text style={styles.placeholder}>
-              No completions logged by your roster yet this week.
-            </Text>
-          ) : (
-            rosterCompletions.map((c) => (
-              <View key={c.id} style={styles.activityRow}>
-                <Text style={styles.activityText}>
-                  <Text style={styles.activityPlayer}>{c.playerName}</Text> completed{' '}
-                  <Text style={styles.activityDrill}>{c.drillName}</Text>
-                </Text>
-                <Text style={styles.activityDate}>{c.date}</Text>
-              </View>
-            ))
-          )}
+          <Pressable style={styles.summaryCard} onPress={() => setShowActivityModal(true)}>
+            <View style={styles.summaryHeaderRow}>
+              <Text style={styles.sectionTitle}>Roster activity this week</Text>
+              {rosterCompletions.length > ACTIVITY_PREVIEW_COUNT ? (
+                <Text style={styles.summaryLink}>View all →</Text>
+              ) : null}
+            </View>
+            {rosterCompletions.length === 0 ? (
+              <Text style={styles.placeholder}>No completions logged by your roster yet this week.</Text>
+            ) : (
+              rosterCompletions.slice(0, ACTIVITY_PREVIEW_COUNT).map((c) => (
+                <View key={c.id} style={styles.activityRow}>
+                  <Text style={styles.activityText}>
+                    <Text style={styles.activityPlayer}>{c.playerName}</Text> completed{' '}
+                    <Text style={styles.activityDrill}>{c.drillName}</Text>
+                  </Text>
+                  <Text style={styles.activityDate}>{c.date}</Text>
+                </View>
+              ))
+            )}
+          </Pressable>
         </>
       )}
 
@@ -782,6 +819,181 @@ export default function MyTeamScreen() {
                 )}
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showRosterModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRosterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.popupCard}>
+            <View style={styles.popupHeaderRow}>
+              <Text style={styles.modalTitle}>Roster ({roster.length})</Text>
+              <Pressable onPress={() => setShowRosterModal(false)} hitSlop={8}>
+                <Text style={styles.popupCloseText}>Done</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.placeholder}>
+              Green dots show who logged something this week, Mon-Sun. Tap a row (or Stats) for a
+              player's full streak/shooting/history. Tap Note to add or edit your note about them.
+              Long-press to remove them from the roster.
+            </Text>
+            <ScrollView style={styles.popupScroll}>
+              {roster.map((p) => {
+                const datesThisWeek = rosterCompletions.filter((c) => c.playerId === p.id).map((c) => c.date);
+                return (
+                  <Pressable
+                    key={p.id}
+                    style={styles.rosterRow}
+                    onPress={() => setStatsPlayer(p)}
+                    onLongPress={() => handleLongPressRosterPlayer(p)}
+                  >
+                    <View style={styles.rosterTopRow}>
+                      <Text style={styles.rosterName}>{p.display_name}</Text>
+                      <View style={styles.rosterLinks}>
+                        <Text style={styles.statsLink}>Stats</Text>
+                        <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
+                          <Text style={styles.noteLink}>Note</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() =>
+                            (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
+                              teamId: team?.id,
+                              threadUserId: p.contactUserId,
+                              view: 'messages',
+                            })
+                          }
+                          hitSlop={8}
+                        >
+                          <Text style={styles.messageLink}>Message</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    <WeekDotsRow completedDates={datesThisWeek} />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showActivityModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowActivityModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.popupCard}>
+            <View style={styles.popupHeaderRow}>
+              <Text style={styles.modalTitle}>Roster activity this week</Text>
+              <Pressable onPress={() => setShowActivityModal(false)} hitSlop={8}>
+                <Text style={styles.popupCloseText}>Done</Text>
+              </Pressable>
+            </View>
+            <ScrollView style={styles.popupScroll}>
+              {rosterCompletions.map((c) => (
+                <View key={c.id} style={styles.activityRow}>
+                  <Text style={styles.activityText}>
+                    <Text style={styles.activityPlayer}>{c.playerName}</Text> completed{' '}
+                    <Text style={styles.activityDrill}>{c.drillName}</Text>
+                  </Text>
+                  <Text style={styles.activityDate}>{c.date}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={browsingDrills}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setBrowsingDrills(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.popupCard}>
+            <View style={styles.popupHeaderRow}>
+              <Text style={styles.modalTitle}>Assign a drill</Text>
+              <Pressable onPress={() => setBrowsingDrills(false)} hitSlop={8}>
+                <Text style={styles.popupCloseText}>Cancel</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.placeholder}>Pick a drill, then choose who it's for.</Text>
+            <ScrollView style={styles.popupScroll}>
+              {availableDrills.map((drill) => (
+                <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
+                  <View style={styles.drillRowMain}>
+                    <View style={styles.drillRowText}>
+                      <Text style={styles.drillName}>{drill.name}</Text>
+                      {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+                    </View>
+                    <Text style={styles.assignTag}>Assign →</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={pickingTargetFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickingTargetFor(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.popupCard}>
+            <View style={styles.popupHeaderRow}>
+              <Text style={styles.modalTitle}>{pickingTargetFor?.name}</Text>
+              <Pressable onPress={() => setPickingTargetFor(null)} hitSlop={8}>
+                <Text style={styles.popupCloseText}>Cancel</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.placeholder}>Assign this drill to the whole team, or check off specific players.</Text>
+            <Pressable
+              style={[styles.smallButton, assigning && styles.buttonDisabled]}
+              onPress={handleAssignToTeam}
+              disabled={assigning}
+            >
+              {assigning ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.smallButtonText}>Whole Team</Text>}
+            </Pressable>
+            <Text style={[styles.modalLabel, { marginTop: 14 }]}>Or specific players</Text>
+            <ScrollView style={styles.popupScroll}>
+              {roster.map((p) => {
+                const checked = selectedPlayerIds.has(p.id);
+                return (
+                  <Pressable
+                    key={p.id}
+                    style={[styles.playerCheckRow, checked && styles.playerCheckRowSelected]}
+                    onPress={() => togglePlayerSelection(p.id)}
+                  >
+                    <Text style={styles.rosterName}>{p.display_name}</Text>
+                    <Text style={checked ? styles.assignedTag : styles.assignTag}>{checked ? '✓ Selected' : 'Select'}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable
+              style={[styles.smallButton, (assigning || selectedPlayerIds.size === 0) && styles.buttonDisabled]}
+              onPress={handleAssignToSelectedPlayers}
+              disabled={assigning || selectedPlayerIds.size === 0}
+            >
+              {assigning ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.smallButtonText}>
+                  Assign to {selectedPlayerIds.size} {selectedPlayerIds.size === 1 ? 'player' : 'players'}
+                </Text>
+              )}
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -970,4 +1182,38 @@ const styles = StyleSheet.create({
   activityPlayer: { fontWeight: '700' },
   activityDrill: { fontWeight: '600' },
   activityDate: { fontSize: 12, color: colors.textMuted },
+  summaryCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: colors.surface,
+    gap: 6,
+  },
+  summaryHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  summaryLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
+  popupCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    gap: 8,
+    maxHeight: '85%',
+  },
+  popupHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  popupCloseText: { fontSize: 14, fontWeight: '600', color: colors.primary },
+  popupScroll: { marginTop: 4 },
+  removeAssignmentText: { fontSize: 13, fontWeight: '600', color: '#C4362B' },
+  playerCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    marginBottom: 8,
+  },
+  playerCheckRowSelected: { borderColor: colors.accent, backgroundColor: '#FFF8EA' },
 });

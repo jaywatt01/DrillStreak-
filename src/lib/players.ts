@@ -331,11 +331,19 @@ export async function getWeeklyDrills(
   const teamIds = (memberships ?? []).map((m) => m.team_id);
 
   if (teamIds.length > 0) {
+    // Picks up both team-wide assignments (player_id null) and anything
+    // targeted specifically at this player — per-player assignment, Jay's
+    // explicit ask Sept 5, 2026 ("in addition to" team-wide). A drill
+    // assigned to a teammate only never shows up here; RLS enforces the
+    // same boundary independently (assignments_team_wide_guardian_read
+    // for the null case, the existing player-ownership clause for the
+    // targeted case), this filter just matches that intent explicitly.
     const { data: assignments, error: assignmentError } = await supabase
       .from('assignments')
       .select(`scheduled_time, duration_minutes, drills(${DRILL_SELECT_COLUMNS})`)
       .in('team_id', teamIds)
-      .eq('week_of', mondayOfThisWeek());
+      .eq('week_of', mondayOfThisWeek())
+      .or(`player_id.is.null,player_id.eq.${playerId}`);
     if (assignmentError) throw assignmentError;
 
     const drills = (assignments ?? [])

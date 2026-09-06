@@ -27,6 +27,12 @@ export type AssignedDrill = Drill & {
   assignmentId: string;
   scheduledTime: string | null;
   durationMinutes: number | null;
+  // null = assigned to the whole team. Set = targeted at one specific
+  // roster player (Jay's explicit ask, Sept 5, 2026: "in addition to"
+  // team-wide, not instead of — assignments.player_id already existed
+  // unused in the schema for exactly this).
+  playerId: string | null;
+  playerName: string | null;
 };
 
 export type RosterCompletion = {
@@ -154,10 +160,15 @@ export async function getAvailableDrills(): Promise<Drill[]> {
   return (data ?? []).map(mapDrillRow);
 }
 
+// Returns every assignment for this team this week — team-wide AND
+// player-targeted alike. The coach's own read access covers both via
+// assignments_access's team-ownership clause (it doesn't care whether
+// player_id is also set), so no RLS change was needed here, only this
+// query and the extended AssignedDrill shape.
 export async function getWeeklyTeamAssignments(teamId: string): Promise<AssignedDrill[]> {
   const { data, error } = await supabase
     .from('assignments')
-    .select(`id, scheduled_time, duration_minutes, drills(${DRILL_SELECT_COLUMNS})`)
+    .select(`id, player_id, scheduled_time, duration_minutes, drills(${DRILL_SELECT_COLUMNS}), players(display_name)`)
     .eq('team_id', teamId)
     .eq('week_of', mondayOfThisWeek());
   if (error) throw error;
@@ -166,12 +177,15 @@ export async function getWeeklyTeamAssignments(teamId: string): Promise<Assigned
     .flatMap((a) => {
       const drill = Array.isArray(a.drills) ? a.drills[0] : a.drills;
       if (!drill) return [];
+      const player = Array.isArray(a.players) ? a.players[0] : a.players;
       return [
         {
           ...mapDrillRow(drill),
           assignmentId: a.id as string,
           scheduledTime: a.scheduled_time as string | null,
           durationMinutes: a.duration_minutes as number | null,
+          playerId: (a.player_id as string | null) ?? null,
+          playerName: (player?.display_name as string | undefined) ?? null,
         },
       ];
     })
@@ -186,6 +200,31 @@ export async function assignDrillToTeam(
 ): Promise<void> {
   const { error } = await supabase.from('assignments').insert({
     team_id: teamId,
+    drill_id: drillId,
+    week_of: mondayOfThisWeek(),
+    scheduled_time: scheduledTime,
+    duration_minutes: durationMinutes,
+  });
+  if (error) throw error;
+}
+
+// Assigns to one specific roster player instead of the whole team — Jay's
+// explicit ask, Sept 5, 2026: "in addition to" team-wide, not instead of.
+// team_id is set alongside player_id (not player_id alone) specifically
+// so the coach's own write access still goes through assignments_access's
+// team-ownership clause, which doesn't care whether player_id is also
+// set — no RLS change needed for this half of the feature, only this
+// function and the schema's already-existing player_id column.
+export async function assignDrillToPlayer(
+  teamId: string,
+  playerId: string,
+  drillId: string,
+  scheduledTime: string | null = null,
+  durationMinutes: number | null = null
+): Promise<void> {
+  const { error } = await supabase.from('assignments').insert({
+    team_id: teamId,
+    player_id: playerId,
     drill_id: drillId,
     week_of: mondayOfThisWeek(),
     scheduled_time: scheduledTime,

@@ -67,6 +67,7 @@ export default function ProgressScreen() {
   const [seasonRenameText, setSeasonRenameText] = useState('');
   const [savingSeasonRename, setSavingSeasonRename] = useState(false);
   const [deletingSeason, setDeletingSeason] = useState(false);
+  const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -236,21 +237,42 @@ export default function ProgressScreen() {
       {progress.length === 0 ? (
         <Text style={styles.placeholder}>No players yet — add one from the Add a Player tab.</Text>
       ) : (
-        progress.map(({ player, streak, activeSeason, visibleHistory, hasMoreHistory, hasFullAccess, allDates, notes, freeThrows, shooting, repTallies, pastSeasons }) => (
+        progress.map(({ player, streak, activeSeason, visibleHistory, hasMoreHistory, hasFullAccess, allDates, notes, freeThrows, shooting, repTallies, pastSeasons }) => {
+          // Real scaling fix, Sept 5, 2026: every linked player's FULL
+          // detail (calendar, shooting stats, rep tallies, notes, season
+          // history, the whole logged-history list) used to render
+          // stacked, unbounded, for every player at once — fine for one
+          // or two kids, a wall of scrolling with 15. Collapsed by
+          // default now, same "compact summary, tap for detail" shape
+          // the Home tab already uses — just an inline expand here rather
+          // than a separate popup, since duplicating this much existing
+          // detail rendering into a new modal component wasn't worth the
+          // risk for the same practical result.
+          const isExpanded = expandedPlayerId === player.id;
+          return (
           <View key={player.id} style={styles.playerSection}>
-            <Text style={styles.playerName}>{player.display_name}</Text>
-            {formatPlayerBio(player) ? (
-              <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
-            ) : null}
-            <View style={styles.streakCard}>
-              <Text style={styles.streakLabel}>
-                Current streak{activeSeason ? ` · ${activeSeason.label}` : ''}
-              </Text>
-              <Text style={styles.streakValue}>
-                {streak} {streak === 1 ? 'day' : 'days'}
-              </Text>
-            </View>
+            <Pressable onPress={() => setExpandedPlayerId(isExpanded ? null : player.id)}>
+              <View style={styles.playerHeaderRow}>
+                <View style={styles.playerHeaderText}>
+                  <Text style={styles.playerName}>{player.display_name}</Text>
+                  {formatPlayerBio(player) ? (
+                    <Text style={styles.playerBio}>{formatPlayerBio(player)}</Text>
+                  ) : null}
+                </View>
+                <Text style={styles.expandLink}>{isExpanded ? 'Hide ↑' : 'View ↓'}</Text>
+              </View>
+              <View style={styles.streakCard}>
+                <Text style={styles.streakLabel}>
+                  Current streak{activeSeason ? ` · ${activeSeason.label}` : ''}
+                </Text>
+                <Text style={styles.streakValue}>
+                  {streak} {streak === 1 ? 'day' : 'days'}
+                </Text>
+              </View>
+            </Pressable>
 
+            {!isExpanded ? null : (
+            <>
             {freeThrows ? (
               <Pressable
                 style={styles.shootingCard}
@@ -381,8 +403,11 @@ export default function ProgressScreen() {
                 <Text style={styles.upsellLink}>Upgrade in Account →</Text>
               </Pressable>
             ) : null}
+            </>
+            )}
           </View>
-        ))
+          );
+        })
       )}
 
       <Modal
@@ -529,6 +554,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   placeholder: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   playerSection: { gap: 8, marginBottom: 8 },
+  playerHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  playerHeaderText: { flex: 1, marginRight: 12 },
+  expandLink: { fontSize: 13, fontWeight: '700', color: colors.primary },
   playerName: { fontSize: 20, fontWeight: '700', color: colors.text },
   playerBio: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: -4 },
   streakCard: {
