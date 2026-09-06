@@ -867,7 +867,7 @@ export default function MyTeamScreen() {
       <Modal
         visible
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setShowRosterModal(false)}
       >
         <View style={styles.modalOverlay}>
@@ -928,7 +928,7 @@ export default function MyTeamScreen() {
       <Modal
         visible
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setShowActivityModal(false)}
       >
         <View style={styles.modalOverlay}>
@@ -959,7 +959,7 @@ export default function MyTeamScreen() {
       <Modal
         visible
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setBrowsingDrills(false)}
       >
         <View style={styles.modalOverlay}>
@@ -1249,7 +1249,13 @@ const styles = StyleSheet.create({
   },
   popupHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   popupCloseText: { fontSize: 14, fontWeight: '600', color: colors.primary },
-  popupScroll: { marginTop: 4 },
+  // Real bug found Sept 6, 2026 on Jay's re-test: no flex meant this
+  // ScrollView just grew to fit its content instead of shrinking inside
+  // popupCard's maxHeight — with more than a couple players, the roster
+  // checklist pushed pickingTargetFor's own "Assign to N players" button
+  // (and Roster/Activity/browsingDrills's own content) off the bottom of
+  // the screen instead of becoming scrollable in the remaining space.
+  popupScroll: { marginTop: 4, flexShrink: 1 },
   removeAssignmentText: { fontSize: 13, fontWeight: '600', color: '#C4362B' },
   playerCheckRow: {
     flexDirection: 'row',
