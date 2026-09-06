@@ -97,6 +97,18 @@ export default function MyTeamScreen() {
   const [savingTeamEdit, setSavingTeamEdit] = useState(false);
   const [schedulingDrill, setSchedulingDrill] = useState<AssignedDrill | null>(null);
   const [pickerTime, setPickerTime] = useState(new Date());
+  // Android-only: `display="default"` is an imperative native dialog, not
+  // a persistent inline widget — the real bug Jay hit ("switch to keyboard
+  // entry, it reverts back to the analog clock"), traced properly this
+  // time (the earlier Modal-mount fix was a red herring; this bug predates
+  // it). Feeding the picker's own onChange value back into its `value`
+  // prop made the native dialog reopen on every pick, each time resetting
+  // to its default (analog) view — discarding whatever entry mode the
+  // user had switched to. Gates the dialog to open once per tap, close
+  // immediately after any event, matching how every other Android time
+  // field actually behaves (tap → dialog → pick → closed, showing the
+  // result) instead of trying to keep it open as a live inline control.
+  const [showAndroidTimePicker, setShowAndroidTimePicker] = useState(false);
   const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [notePlayer, setNotePlayer] = useState<RosterPlayer | null>(null);
@@ -385,11 +397,17 @@ export default function MyTeamScreen() {
     setPickerTime(timeStringToDate(assigned.scheduledTime));
     setPickerDuration(String(assigned.durationMinutes ?? assigned.estimatedMinutes ?? DEFAULT_DRILL_MINUTES));
     setSchedulingDrill(assigned);
+    // Android's dialog opens on demand (see showAndroidTimePicker above) —
+    // start each new scheduler visit ready for the user to tap "Change
+    // time" rather than popping the native dialog open immediately.
+    setShowAndroidTimePicker(false);
   };
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
+    // Always close the native Android dialog after any event — leaving it
+    // "open" (rendered) is what caused the reopen-on-every-pick loop.
+    setShowAndroidTimePicker(false);
     if (Platform.OS === 'android' && event.type === 'dismissed') {
-      setSchedulingDrill(null);
       return;
     }
     if (selected) setPickerTime(selected);
@@ -728,12 +746,14 @@ export default function MyTeamScreen() {
           real regression hit and reverted Sept 6, 2026: Android's
           DateTimePicker with display="default" is an imperative native
           dialog that (re)opens on mount, so unmounting/remounting this
-          Modal every time schedulingDrill toggled made the native time
-          picker pop back up on every open, looping until Cancel. This
-          modal was never reported as having the iOS stuck-popup bug the
-          others below had, so it stays on the original always-mounted,
-          visible-toggle pattern instead of chasing consistency into a
-          real Android break. */}
+          whole Modal every time schedulingDrill toggled made the native
+          time picker pop back up on every open. This modal was never
+          reported as having the iOS stuck-popup bug the others below had,
+          so it stays on the original always-mounted, visible-toggle
+          pattern. Separately, and this was the actual cause of "switch to
+          keyboard entry, it reverts to analog clock" (the Modal fix above
+          was a red herring for this one) — see showAndroidTimePicker's
+          comment near this screen's other state for the real fix. */}
       <Modal
         visible={schedulingDrill != null}
         transparent
@@ -748,12 +768,20 @@ export default function MyTeamScreen() {
               they still choose whether to add it, and can change the time.
             </Text>
             <Text style={styles.modalLabel}>Suggested time</Text>
-            <DateTimePicker
-              value={pickerTime}
-              mode="time"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={handlePickerChange}
-            />
+            {Platform.OS === 'ios' ? (
+              <DateTimePicker value={pickerTime} mode="time" display="spinner" onChange={handlePickerChange} />
+            ) : (
+              <>
+                <Pressable style={styles.smallButton} onPress={() => setShowAndroidTimePicker(true)}>
+                  <Text style={styles.smallButtonText}>
+                    {pickerTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · Change time
+                  </Text>
+                </Pressable>
+                {showAndroidTimePicker && (
+                  <DateTimePicker value={pickerTime} mode="time" display="default" onChange={handlePickerChange} />
+                )}
+              </>
+            )}
             <Text style={styles.modalLabel}>Duration (minutes)</Text>
             <TextInput
               style={styles.input}
