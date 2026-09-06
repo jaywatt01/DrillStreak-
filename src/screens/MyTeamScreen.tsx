@@ -893,24 +893,44 @@ export default function MyTeamScreen() {
                   <Pressable
                     key={p.id}
                     style={styles.rosterRow}
-                    onPress={() => setStatsPlayer(p)}
+                    onPress={() => {
+                      // Real bug found and fixed Sept 6, 2026: tapping
+                      // Stats/Note from inside this popup tried to present
+                      // a second native Modal on top of this one — iOS
+                      // only tolerates one presented modal at a time, so
+                      // the second one silently failed to appear, and it
+                      // left the modal stack broken for every popup after
+                      // it (Roster/Assign stopped opening at all until a
+                      // force-quit). Closing this popup first, same as
+                      // Message already effectively does by navigating to
+                      // a different tab entirely.
+                      setShowRosterModal(false);
+                      setStatsPlayer(p);
+                    }}
                     onLongPress={() => handleLongPressRosterPlayer(p)}
                   >
                     <View style={styles.rosterTopRow}>
                       <Text style={styles.rosterName}>{p.display_name}</Text>
                       <View style={styles.rosterLinks}>
                         <Text style={styles.statsLink}>Stats</Text>
-                        <Pressable onPress={() => openNoteEditor(p)} hitSlop={8}>
+                        <Pressable
+                          onPress={() => {
+                            setShowRosterModal(false);
+                            openNoteEditor(p);
+                          }}
+                          hitSlop={8}
+                        >
                           <Text style={styles.noteLink}>Note</Text>
                         </Pressable>
                         <Pressable
-                          onPress={() =>
+                          onPress={() => {
+                            setShowRosterModal(false);
                             (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
                               teamId: team?.id,
                               threadUserId: p.contactUserId,
                               view: 'messages',
-                            })
-                          }
+                            });
+                          }}
                           hitSlop={8}
                         >
                           <Text style={styles.messageLink}>Message</Text>
