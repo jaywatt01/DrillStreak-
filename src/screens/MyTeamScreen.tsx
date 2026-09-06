@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
@@ -173,17 +173,35 @@ export default function MyTeamScreen() {
   // Stats/Note reopen it directly from their own close handler (no
   // navigation involved), but Message leaves this screen entirely for the
   // Team Chat tab, so there's no "close" moment to hook here other than
-  // this tab regaining focus. Deliberately a separate effect from the one
-  // above (which always reruns `load` on focus) — this one only needs to
-  // act when reopenRosterAfterClose is actually true, and including it in
-  // deps keeps the callback fresh instead of capturing a stale flag value.
+  // this tab regaining focus.
+  //
+  // Real regression found and fixed Sept 6, 2026, right after shipping
+  // this: useFocusEffect doesn't only fire on a genuine tab-focus event —
+  // React Navigation also re-runs it whenever its memoized callback's own
+  // dependencies change WHILE the screen is already focused, which is
+  // exactly what happens for Stats/Note (they're just Modals on this same
+  // screen; it never actually loses focus for them). The first version
+  // put reopenRosterAfterClose directly in the deps array, so the instant
+  // Stats/Note set that flag to true, this effect fired immediately and
+  // reopened Roster right back on top of the popup that was just asked to
+  // open — corrupting the modal stack on iOS (Stats/Note showed nothing)
+  // and stacking both visibly on Android. A ref sidesteps this: the
+  // callback's identity never changes (empty deps), so React Navigation
+  // only actually invokes it on a real focus transition, and it reads the
+  // ref's latest value at that moment instead of depending on it.
+  const reopenRosterAfterCloseRef = useRef(false);
+  useEffect(() => {
+    reopenRosterAfterCloseRef.current = reopenRosterAfterClose;
+  }, [reopenRosterAfterClose]);
+
   useFocusEffect(
     useCallback(() => {
-      if (reopenRosterAfterClose) {
+      if (reopenRosterAfterCloseRef.current) {
+        reopenRosterAfterCloseRef.current = false;
         setReopenRosterAfterClose(false);
         setShowRosterModal(true);
       }
-    }, [reopenRosterAfterClose])
+    }, [])
   );
 
   // Keeps the Team Overview dots (and the roster activity feed) live while
