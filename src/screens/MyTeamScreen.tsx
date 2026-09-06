@@ -724,9 +724,18 @@ export default function MyTeamScreen() {
         </>
       )}
 
-      {schedulingDrill && (
+      {/* Deliberately NOT conditionally-mounted like the popups below —
+          real regression hit and reverted Sept 6, 2026: Android's
+          DateTimePicker with display="default" is an imperative native
+          dialog that (re)opens on mount, so unmounting/remounting this
+          Modal every time schedulingDrill toggled made the native time
+          picker pop back up on every open, looping until Cancel. This
+          modal was never reported as having the iOS stuck-popup bug the
+          others below had, so it stays on the original always-mounted,
+          visible-toggle pattern instead of chasing consistency into a
+          real Android break. */}
       <Modal
-        visible
+        visible={schedulingDrill != null}
         transparent
         animationType="fade"
         onRequestClose={() => setSchedulingDrill(null)}
@@ -774,7 +783,6 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
-      )}
 
       {notePlayer && (
       <Modal
