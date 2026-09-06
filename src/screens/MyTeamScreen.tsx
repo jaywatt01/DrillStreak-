@@ -121,6 +121,15 @@ export default function MyTeamScreen() {
   // real scaling fix Jay asked for, Sept 5, 2026: none of these render
   // inline on the main screen anymore once a team has real size.
   const [showRosterModal, setShowRosterModal] = useState(false);
+  // Real UX ask, Sept 6, 2026: Stats/Note/Message from inside the Roster
+  // popup have to close it first (the modal-stacking fix above), but that
+  // shouldn't mean re-tapping "Roster" from scratch every time a coach
+  // wants to check a few players in a row. Set alongside closing Roster
+  // for any of those 3 actions; consumed (and cleared) the moment Roster
+  // actually reopens, whether that's via Stats/Note's own close handler
+  // or, for Message, the focus-effect below firing when this tab regains
+  // focus after the coach comes back from Team Chat.
+  const [reopenRosterAfterClose, setReopenRosterAfterClose] = useState(false);
   const [showActivityModal, setShowActivityModal] = useState(false);
   // Two-step assign flow: null = closed; a Drill = picking who ("Whole
   // Team" or specific players) for that drill.
@@ -158,6 +167,23 @@ export default function MyTeamScreen() {
     useCallback(() => {
       load();
     }, [load])
+  );
+
+  // Reopens Roster after a coach comes back from messaging a player —
+  // Stats/Note reopen it directly from their own close handler (no
+  // navigation involved), but Message leaves this screen entirely for the
+  // Team Chat tab, so there's no "close" moment to hook here other than
+  // this tab regaining focus. Deliberately a separate effect from the one
+  // above (which always reruns `load` on focus) — this one only needs to
+  // act when reopenRosterAfterClose is actually true, and including it in
+  // deps keeps the callback fresh instead of capturing a stale flag value.
+  useFocusEffect(
+    useCallback(() => {
+      if (reopenRosterAfterClose) {
+        setReopenRosterAfterClose(false);
+        setShowRosterModal(true);
+      }
+    }, [reopenRosterAfterClose])
   );
 
   // Keeps the Team Overview dots (and the roster activity feed) live while
@@ -348,6 +374,25 @@ export default function MyTeamScreen() {
     );
   };
 
+  // Shared close logic for Stats/Note, so "reopen Roster after this
+  // closes" only has to be handled in one place per modal rather than at
+  // every button/onRequestClose that can dismiss it.
+  const closeStatsPlayer = () => {
+    setStatsPlayer(null);
+    if (reopenRosterAfterClose) {
+      setReopenRosterAfterClose(false);
+      setShowRosterModal(true);
+    }
+  };
+
+  const closeNotePlayer = () => {
+    setNotePlayer(null);
+    if (reopenRosterAfterClose) {
+      setReopenRosterAfterClose(false);
+      setShowRosterModal(true);
+    }
+  };
+
   const openNoteEditor = async (player: RosterPlayer) => {
     setNotePlayer(player);
     setNoteText('');
@@ -367,7 +412,7 @@ export default function MyTeamScreen() {
     setError(null);
     try {
       await saveMyNoteForPlayer(notePlayer.id, noteText);
-      setNotePlayer(null);
+      closeNotePlayer();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save note.');
     } finally {
@@ -820,7 +865,7 @@ export default function MyTeamScreen() {
         visible
         transparent
         animationType="fade"
-        onRequestClose={() => setNotePlayer(null)}
+        onRequestClose={closeNotePlayer}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -845,7 +890,7 @@ export default function MyTeamScreen() {
             <View style={styles.editButtonRow}>
               <Pressable
                 style={[styles.smallButton, styles.smallButtonSecondary]}
-                onPress={() => setNotePlayer(null)}
+                onPress={closeNotePlayer}
               >
                 <Text style={styles.smallButtonSecondaryText}>Cancel</Text>
               </Pressable>
@@ -903,8 +948,12 @@ export default function MyTeamScreen() {
                       // it (Roster/Assign stopped opening at all until a
                       // force-quit). Closing this popup first, same as
                       // Message already effectively does by navigating to
-                      // a different tab entirely.
+                      // a different tab entirely. reopenRosterAfterClose
+                      // is the follow-up UX fix Jay asked for right after:
+                      // check a few players' Stats/Notes/Messages back to
+                      // back without re-tapping "Roster" every single time.
                       setShowRosterModal(false);
+                      setReopenRosterAfterClose(true);
                       setStatsPlayer(p);
                     }}
                     onLongPress={() => handleLongPressRosterPlayer(p)}
@@ -916,6 +965,7 @@ export default function MyTeamScreen() {
                         <Pressable
                           onPress={() => {
                             setShowRosterModal(false);
+                            setReopenRosterAfterClose(true);
                             openNoteEditor(p);
                           }}
                           hitSlop={8}
@@ -925,6 +975,7 @@ export default function MyTeamScreen() {
                         <Pressable
                           onPress={() => {
                             setShowRosterModal(false);
+                            setReopenRosterAfterClose(true);
                             (navigation.navigate as (name: never, params?: object) => void)('Team Chat' as never, {
                               teamId: team?.id,
                               threadUserId: p.contactUserId,
@@ -1077,7 +1128,7 @@ export default function MyTeamScreen() {
         <CoachPlayerStatsModal
           playerId={statsPlayer.id}
           playerName={statsPlayer.display_name}
-          onClose={() => setStatsPlayer(null)}
+          onClose={closeStatsPlayer}
         />
       ) : null}
     </ScrollView>
