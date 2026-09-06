@@ -51,6 +51,32 @@ async function getTargetCalendarId(): Promise<string> {
     writable.find((c) => c.source?.isLocalAccount !== true) ??
     writable.find((c) => c.isPrimary) ??
     writable[0];
+  // Temporary diagnostic, Sept 6, 2026 — the Sept 6 fix above (prefer a
+  // synced-account calendar) was best-effort, never actually confirmed
+  // against a real device's real calendar list, and Jay's still seeing
+  // drills not show up in Google Calendar after it. Logging the real list
+  // instead of guessing again: every calendar found (id/title/source
+  // name+type+isLocalAccount/isPrimary/allowsModifications/isVisible) and
+  // which one got picked. Remove once the real cause is confirmed and
+  // fixed for real — this is not meant to stay in permanently.
+  console.log(
+    '[calendar-debug] all calendars:',
+    JSON.stringify(
+      calendars.map((c) => ({
+        id: c.id,
+        title: c.title,
+        sourceName: c.source?.name,
+        sourceType: c.source?.type,
+        isLocalAccount: c.source?.isLocalAccount,
+        isPrimary: c.isPrimary,
+        allowsModifications: c.allowsModifications,
+        isVisible: c.isVisible,
+      })),
+      null,
+      2
+    )
+  );
+  console.log('[calendar-debug] chosen target:', target?.id, target?.title);
   if (!target) {
     throw new Error('No writable calendar found on this device.');
   }
