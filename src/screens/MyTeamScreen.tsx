@@ -772,7 +772,10 @@ export default function MyTeamScreen() {
               <DateTimePicker value={pickerTime} mode="time" display="spinner" onChange={handlePickerChange} />
             ) : (
               <>
-                <Pressable style={styles.smallButton} onPress={() => setShowAndroidTimePicker(true)}>
+                <Pressable
+                  style={[styles.smallButton, styles.standaloneButton]}
+                  onPress={() => setShowAndroidTimePicker(true)}
+                >
                   <Text style={styles.smallButtonText}>
                     {pickerTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · Change time
                   </Text>
@@ -1006,7 +1009,7 @@ export default function MyTeamScreen() {
             </View>
             <Text style={styles.placeholder}>Assign this drill to the whole team, or check off specific players.</Text>
             <Pressable
-              style={[styles.smallButton, assigning && styles.buttonDisabled]}
+              style={[styles.smallButton, styles.standaloneButton, assigning && styles.buttonDisabled]}
               onPress={handleAssignToTeam}
               disabled={assigning}
             >
@@ -1029,7 +1032,11 @@ export default function MyTeamScreen() {
               })}
             </ScrollView>
             <Pressable
-              style={[styles.smallButton, (assigning || selectedPlayerIds.size === 0) && styles.buttonDisabled]}
+              style={[
+                styles.smallButton,
+                styles.standaloneButton,
+                (assigning || selectedPlayerIds.size === 0) && styles.buttonDisabled,
+              ]}
               onPress={handleAssignToSelectedPlayers}
               disabled={assigning || selectedPlayerIds.size === 0}
             >
@@ -1091,6 +1098,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  // Real bug found and fixed Sept 6, 2026, after multiple wrong guesses —
+  // this was the actual cause of the "blank button" reports the whole
+  // time, not a Modal/animation issue. smallButton's `flex: 1` only makes
+  // sense paired inside editButtonRow (flexDirection: 'row', two buttons
+  // splitting the width). Used standalone in a column container (the
+  // "Change time" button, "Whole Team", "Assign to N players"), flex: 1
+  // instead stretches the button to fill all remaining VERTICAL space in
+  // the popup — a giant blue rectangle with the text lost somewhere
+  // inside it, not actually blank. Override back to a normal button.
+  standaloneButton: { flex: 0 },
   smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   smallButtonSecondaryText: { color: colors.text, fontSize: 14, fontWeight: '600' },
   inviteCard: {
