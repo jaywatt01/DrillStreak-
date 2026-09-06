@@ -724,8 +724,9 @@ export default function MyTeamScreen() {
         </>
       )}
 
+      {schedulingDrill && (
       <Modal
-        visible={schedulingDrill != null}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => setSchedulingDrill(null)}
@@ -773,9 +774,11 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
+      {notePlayer && (
       <Modal
-        visible={notePlayer != null}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => setNotePlayer(null)}
@@ -822,9 +825,11 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
+      {showRosterModal && (
       <Modal
-        visible={showRosterModal}
+        visible
         transparent
         animationType="slide"
         onRequestClose={() => setShowRosterModal(false)}
@@ -881,9 +886,11 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
+      {showActivityModal && (
       <Modal
-        visible={showActivityModal}
+        visible
         transparent
         animationType="slide"
         onRequestClose={() => setShowActivityModal(false)}
@@ -910,9 +917,11 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
+      {browsingDrills && (
       <Modal
-        visible={browsingDrills}
+        visible
         transparent
         animationType="slide"
         onRequestClose={() => setBrowsingDrills(false)}
@@ -942,9 +951,11 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
+      {pickingTargetFor && (
       <Modal
-        visible={pickingTargetFor != null}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => setPickingTargetFor(null)}
@@ -997,6 +1008,7 @@ export default function MyTeamScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
       {statsPlayer ? (
         <CoachPlayerStatsModal
