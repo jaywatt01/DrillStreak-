@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import {
   ActivityIndicator,
   Alert,
@@ -82,7 +81,6 @@ function errorMessage(e: unknown, fallback: string): string {
 }
 
 export default function TeamBoardScreen() {
-  const tabBarHeight = useBottomTabBarHeight();
   // Set when this screen was opened by tapping a push notification
   // (App.tsx's navigateFromNotification) — lands on the actual
   // team/conversation the notification was about, instead of whatever
@@ -443,15 +441,20 @@ export default function TeamBoardScreen() {
           // Android-specific KeyboardAvoidingView behavior, distinct from
           // iOS's 'padding'.
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          // Real gap found Sept 6, 2026 on a real device test: this screen
-          // is a direct bottom-tab screen (App.tsx's Tab.Screen for "Team
-          // Chat"), so the always-visible tab bar sits below whatever
-          // `KeyboardAvoidingView` reserves — a flat 90 (tuned for iOS's
-          // header) didn't know about that on Android, leaving the
-          // composer still partly covered. `useBottomTabBarHeight()` adds
-          // the tab bar's own real height on top of the same base offset,
-          // Android only (iOS's 90 alone was already correct there).
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 90 + tabBarHeight}
+          // Reverted Sept 6, 2026 — real attempt, real failure, worth
+          // keeping the record: tried adding useBottomTabBarHeight() on
+          // top of the flat 90 here, theorizing the tab bar's space wasn't
+          // accounted for. Wrong model — this screen's own layout already
+          // excludes the tab bar (React Navigation crops content above it
+          // via flex), so the extra height wasn't compensating for
+          // anything real; it just over-reserved space, producing a
+          // visible gap between the last message and the keyboard on the
+          // real device (confirmed by screenshot, not assumed). Back to
+          // plain 90, which left only a small residual cover — worse
+          // than a full fix, but a real, measured regression from
+          // guessing further without another way to iterate against the
+          // actual device.
+          keyboardVerticalOffset={90}
         >
           {contacts.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.threadPicker}>
