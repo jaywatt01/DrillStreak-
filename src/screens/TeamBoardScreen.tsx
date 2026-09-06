@@ -456,22 +456,28 @@ export default function TeamBoardScreen() {
           // actual device.
           keyboardVerticalOffset={90}
         >
-          {contacts.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.threadPicker}>
-              <Pressable style={[styles.chip, thread === null && styles.chipActive]} onPress={() => setThread(null)}>
-                <Text style={[styles.chipText, thread === null && styles.chipTextActive]}>Team</Text>
+          {/* Real bug found and fixed Sept 6, 2026: this whole chip row,
+              including "Team," used to only render when contacts.length
+              was nonzero — meaning if that list ever came back empty (or
+              hadn't loaded yet when a deep link, like the Roster popup's
+              "Message" link, opened straight into a specific player's
+              thread), there was no chip at all left to switch back to the
+              team-wide feed with. "Team" always shows now, independent of
+              whether there's anyone to individually DM. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.threadPicker}>
+            <Pressable style={[styles.chip, thread === null && styles.chipActive]} onPress={() => setThread(null)}>
+              <Text style={[styles.chipText, thread === null && styles.chipTextActive]}>Team</Text>
+            </Pressable>
+            {contacts.map((c) => (
+              <Pressable
+                key={c.userId}
+                style={[styles.chip, thread === c.userId && styles.chipActive]}
+                onPress={() => setThread(c.userId)}
+              >
+                <Text style={[styles.chipText, thread === c.userId && styles.chipTextActive]}>{c.label}</Text>
               </Pressable>
-              {contacts.map((c) => (
-                <Pressable
-                  key={c.userId}
-                  style={[styles.chip, thread === c.userId && styles.chipActive]}
-                  onPress={() => setThread(c.userId)}
-                >
-                  <Text style={[styles.chipText, thread === c.userId && styles.chipTextActive]}>{c.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          ) : null}
+            ))}
+          </ScrollView>
 
           <ScrollView
             style={styles.flex}
