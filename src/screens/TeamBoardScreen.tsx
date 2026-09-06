@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import {
   ActivityIndicator,
   Alert,
@@ -81,6 +82,7 @@ function errorMessage(e: unknown, fallback: string): string {
 }
 
 export default function TeamBoardScreen() {
+  const tabBarHeight = useBottomTabBarHeight();
   // Set when this screen was opened by tapping a push notification
   // (App.tsx's navigateFromNotification) — lands on the actual
   // team/conversation the notification was about, instead of whatever
@@ -441,7 +443,15 @@ export default function TeamBoardScreen() {
           // Android-specific KeyboardAvoidingView behavior, distinct from
           // iOS's 'padding'.
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={90}
+          // Real gap found Sept 6, 2026 on a real device test: this screen
+          // is a direct bottom-tab screen (App.tsx's Tab.Screen for "Team
+          // Chat"), so the always-visible tab bar sits below whatever
+          // `KeyboardAvoidingView` reserves — a flat 90 (tuned for iOS's
+          // header) didn't know about that on Android, leaving the
+          // composer still partly covered. `useBottomTabBarHeight()` adds
+          // the tab bar's own real height on top of the same base offset,
+          // Android only (iOS's 90 alone was already correct there).
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 90 + tabBarHeight}
         >
           {contacts.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.threadPicker}>

@@ -29,12 +29,32 @@ async function getTargetCalendarId(): Promise<string> {
     return defaultCalendar.id;
   }
 
+  // Real gap found Sept 6, 2026 on a real device (BLU View Speed Ultra):
+  // the drill saved successfully (confirmed by the app's own cancel/delete
+  // working) but never showed up in Google Calendar. Root cause — never
+  // confirmed on that exact device, but this is the documented mechanism
+  // and the fix is safe either way (falls back to the old behavior if no
+  // synced account calendar exists): some Android OEM builds ship a
+  // bundled offline/local calendar account already marked `isPrimary`,
+  // separate from the signed-in Google account's calendar. `allowsModifications
+  // && isPrimary` picked whichever came first, which can be that local
+  // account — and Google Calendar's app doesn't display local,
+  // non-account calendars by default, so the event is real but invisible
+  // in the one app the user actually checks. Now prefers a writable
+  // calendar backed by a real synced account (`source.isLocalAccount`
+  // is not true) before falling back to primary-only, then to any
+  // writable calendar at all.
   const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-  const writable = calendars.find((c) => c.allowsModifications && c.isPrimary) ?? calendars.find((c) => c.allowsModifications);
-  if (!writable) {
+  const writable = calendars.filter((c) => c.allowsModifications);
+  const target =
+    writable.find((c) => c.isPrimary && c.source?.isLocalAccount !== true) ??
+    writable.find((c) => c.source?.isLocalAccount !== true) ??
+    writable.find((c) => c.isPrimary) ??
+    writable[0];
+  if (!target) {
     throw new Error('No writable calendar found on this device.');
   }
-  return writable.id;
+  return target.id;
 }
 
 // Returns the device's own calendar event id — callers that want to be
