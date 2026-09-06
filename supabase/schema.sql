@@ -637,6 +637,35 @@ revoke all on function is_teammate_of(uuid, uuid) from public;
 revoke all on function is_teammate_of(uuid, uuid) from anon;
 grant execute on function is_teammate_of(uuid, uuid) to authenticated;
 
+-- player_stats_visible_to_team: security-definer, same reason as
+-- is_player_owner_or_guardian/is_teammate_of above. Real bug found and
+-- fixed Sept 6, 2026: completions_teammate_read and badges_teammate_read
+-- both used to check this flag via a raw `exists (select 1 from players
+-- p where ...)` embed — but players_access only grants read to the
+-- owner, guardian, or coach, NEVER a teammate. That embed was silently
+-- blocked by players' own RLS for every real teammate, making the flag
+-- check always evaluate false regardless of its real value — meaning
+-- "a teammate can see another player's stats/badges" has never actually
+-- worked for anyone, on either policy, since either was written. Found
+-- while investigating a live report (Home > Teammates showed a real
+-- teammate's card as empty — 0-day streak, no history — while the same
+-- player's data displayed fully from the coach's own account). This
+-- function bypasses RLS internally to read just the one boolean, the
+-- same pattern already used to break the identical recursion/silent-
+-- block problem for ownership and team-membership checks.
+create or replace function player_stats_visible_to_team(p_player_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select coalesce((select stats_visible_to_team from players where id = p_player_id), false);
+$$;
+
+revoke all on function player_stats_visible_to_team(uuid) from public;
+grant execute on function player_stats_visible_to_team(uuid) to authenticated;
+
 -- completions_teammate_read: lets a teammate (not the coach — that's
 -- completions_coach_read above) see another roster player's full
 -- completion history, gated by that player's own stats_visible_to_team
@@ -648,7 +677,7 @@ grant execute on function is_teammate_of(uuid, uuid) to authenticated;
 create policy completions_teammate_read on completions
   for select
   using (
-    exists (select 1 from players p where p.id = completions.player_id and p.stats_visible_to_team = true)
+    player_stats_visible_to_team(completions.player_id)
     and is_teammate_of(completions.player_id, auth.uid())
   );
 
@@ -1065,10 +1094,13 @@ create policy badges_coach_read on badges
 
 -- Same opt-out visibility as stats — a teammate sees badges only if this
 -- player's stats_visible_to_team is still true, one flag governing both.
+-- Uses player_stats_visible_to_team() (see completions_teammate_read's
+-- comment above) rather than a raw players embed — same silent-block bug,
+-- found and fixed the same day.
 create policy badges_teammate_read on badges
   for select
   using (
-    exists (select 1 from players p where p.id = badges.player_id and p.stats_visible_to_team = true)
+    player_stats_visible_to_team(badges.player_id)
     and is_teammate_of(badges.player_id, auth.uid())
   );
 
@@ -3557,3 +3589,45 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --       and is_player_owner_or_guardian(tm.player_id, auth.uid())
 --   )
 -- );
+
+-- ---------------------------------------------------------------------------
+-- 2026-09-06: fix completions_teammate_read and badges_teammate_read — both
+-- checked a player's stats_visible_to_team opt-out flag via a raw `exists
+-- (select 1 from players p where ...)` embed. players_access only grants
+-- read to the owner, guardian, or coach, never a teammate — so that embed
+-- was silently blocked by players' own RLS for every real teammate, making
+-- the flag check always evaluate false regardless of its actual value.
+-- "A teammate can see another player's stats/badges" has never actually
+-- worked for anyone, on either policy, since either was written. Found
+-- from a live report (Home > Teammates showed a real teammate's card as
+-- empty while the same player's data displayed fully from the coach's own
+-- account, on the same live data). CONFIRMED APPLIED AND VERIFIED LIVE,
+-- both policies, both directions: a real teammate (Player 5's guardian,
+-- viewing Player 1 on PMF- Positive Male Figures) now sees all 49 real
+-- completions and both real badges (0 of each before the fix); an
+-- unrelated random caller still sees 0 of either.
+-- ---------------------------------------------------------------------------
+-- create or replace function player_stats_visible_to_team(p_player_id uuid)
+-- returns boolean
+-- language sql
+-- security definer
+-- stable
+-- set search_path = public
+-- as $$
+--   select coalesce((select stats_visible_to_team from players where id = p_player_id), false);
+-- $$;
+--
+-- revoke all on function player_stats_visible_to_team(uuid) from public;
+-- grant execute on function player_stats_visible_to_team(uuid) to authenticated;
+--
+-- alter policy completions_teammate_read on completions
+--   using (
+--     player_stats_visible_to_team(completions.player_id)
+--     and is_teammate_of(completions.player_id, auth.uid())
+--   );
+--
+-- alter policy badges_teammate_read on badges
+--   using (
+--     player_stats_visible_to_team(badges.player_id)
+--     and is_teammate_of(badges.player_id, auth.uid())
+--   );
