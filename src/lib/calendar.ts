@@ -29,21 +29,23 @@ async function getTargetCalendarId(): Promise<string> {
     return defaultCalendar.id;
   }
 
-  // Real gap found Sept 6, 2026 on a real device (BLU View Speed Ultra):
+  // Real bug found Sept 6, 2026 on a real device (BLU View Speed Ultra):
   // the drill saved successfully (confirmed by the app's own cancel/delete
-  // working) but never showed up in Google Calendar. Root cause — never
-  // confirmed on that exact device, but this is the documented mechanism
-  // and the fix is safe either way (falls back to the old behavior if no
-  // synced account calendar exists): some Android OEM builds ship a
-  // bundled offline/local calendar account already marked `isPrimary`,
-  // separate from the signed-in Google account's calendar. `allowsModifications
-  // && isPrimary` picked whichever came first, which can be that local
-  // account — and Google Calendar's app doesn't display local,
-  // non-account calendars by default, so the event is real but invisible
-  // in the one app the user actually checks. Now prefers a writable
-  // calendar backed by a real synced account (`source.isLocalAccount`
-  // is not true) before falling back to primary-only, then to any
-  // writable calendar at all.
+  // working) but never showed up in Google Calendar. Root cause CONFIRMED
+  // LIVE via a temporary diagnostic log against Jay's real device (removed
+  // once confirmed, not left in) — the phone had a bundled offline "PC
+  // Sync" local-account calendar marked isPrimary: true, completely
+  // separate from the real jaywatt01@gmail.com Google account calendar
+  // (also present, also writable, but isPrimary: false at the time).
+  // `allowsModifications && isPrimary` picked "PC Sync" every time — and
+  // Google Calendar's app doesn't display local, non-account calendars by
+  // default, so the event was real but invisible in the one app anyone
+  // actually checks. Prefers a writable calendar backed by a real synced
+  // account (`source.isLocalAccount` is not true) before falling back to
+  // primary-only, then to any writable calendar at all. Confirmed on
+  // Jay's device: correctly skips "PC Sync," picks the real Google
+  // account calendar, the drill shows up in Google Calendar, and
+  // deleting it in the app deletes the real calendar event too.
   const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
   const writable = calendars.filter((c) => c.allowsModifications);
   const target =
@@ -51,32 +53,6 @@ async function getTargetCalendarId(): Promise<string> {
     writable.find((c) => c.source?.isLocalAccount !== true) ??
     writable.find((c) => c.isPrimary) ??
     writable[0];
-  // Temporary diagnostic, Sept 6, 2026 — the Sept 6 fix above (prefer a
-  // synced-account calendar) was best-effort, never actually confirmed
-  // against a real device's real calendar list, and Jay's still seeing
-  // drills not show up in Google Calendar after it. Logging the real list
-  // instead of guessing again: every calendar found (id/title/source
-  // name+type+isLocalAccount/isPrimary/allowsModifications/isVisible) and
-  // which one got picked. Remove once the real cause is confirmed and
-  // fixed for real — this is not meant to stay in permanently.
-  console.log(
-    '[calendar-debug] all calendars:',
-    JSON.stringify(
-      calendars.map((c) => ({
-        id: c.id,
-        title: c.title,
-        sourceName: c.source?.name,
-        sourceType: c.source?.type,
-        isLocalAccount: c.source?.isLocalAccount,
-        isPrimary: c.isPrimary,
-        allowsModifications: c.allowsModifications,
-        isVisible: c.isVisible,
-      })),
-      null,
-      2
-    )
-  );
-  console.log('[calendar-debug] chosen target:', target?.id, target?.title);
   if (!target) {
     throw new Error('No writable calendar found on this device.');
   }
