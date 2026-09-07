@@ -147,6 +147,17 @@ export default function HomeScreen() {
   const [addingToCalendarId, setAddingToCalendarId] = useState<string | null>(null);
   const [schedulingFor, setSchedulingFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
   const [pickerTime, setPickerTime] = useState(new Date());
+  // Real bug found Sept 6, 2026 — the same one already fixed in My Team's
+  // "Set suggested time" picker (PR #65), missed here because this is a
+  // separate DateTimePicker in a separate screen, and this is almost
+  // certainly the actual bug behind Jay's original "can't even add
+  // anything to the calendar, the time keeps coming back up" report —
+  // that repro was on THIS screen's Add-to-Calendar flow, not the coach
+  // one. Android's `display="default"` is an imperative native dialog;
+  // feeding its own onChange value back into `value` made it reopen on
+  // every pick, resetting to analog each time. Same fix: gate it to open
+  // once per tap, close immediately after any event.
+  const [showAndroidTimePicker, setShowAndroidTimePicker] = useState(false);
   const [pickerDuration, setPickerDuration] = useState(String(DEFAULT_DRILL_MINUTES));
   const [loggingResultFor, setLoggingResultFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
   const [resultMakes, setResultMakes] = useState('');
@@ -625,16 +636,16 @@ export default function HomeScreen() {
     setPickerTime(timeForToday(drill.scheduledTime));
     setPickerDuration(String(drill.scheduledDurationMinutes ?? drill.estimatedMinutes ?? DEFAULT_DRILL_MINUTES));
     setSchedulingFor({ playerId, drill });
+    setShowAndroidTimePicker(false);
   };
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
-    if (Platform.OS === 'android') {
-      // Android's picker is a self-dismissing dialog, not an inline control —
-      // a cancel tap fires 'dismissed' with no date, so close our modal too.
-      if (event.type === 'dismissed') {
-        setSchedulingFor(null);
-        return;
-      }
+    // Always close the native Android dialog after any event — leaving it
+    // "open" (rendered) is what caused the reopen-on-every-pick loop (see
+    // showAndroidTimePicker's comment above).
+    setShowAndroidTimePicker(false);
+    if (Platform.OS === 'android' && event.type === 'dismissed') {
+      return;
     }
     if (selected) setPickerTime(selected);
   };
@@ -1072,12 +1083,23 @@ export default function HomeScreen() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{schedulingFor?.drill.name}</Text>
             <Text style={styles.modalLabel}>Time</Text>
-            <DateTimePicker
-              value={pickerTime}
-              mode="time"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={handlePickerChange}
-            />
+            {Platform.OS === 'ios' ? (
+              <DateTimePicker value={pickerTime} mode="time" display="spinner" onChange={handlePickerChange} />
+            ) : (
+              <>
+                <Pressable
+                  style={[styles.smallButton, styles.standaloneButton]}
+                  onPress={() => setShowAndroidTimePicker(true)}
+                >
+                  <Text style={styles.smallButtonText}>
+                    {pickerTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · Change time
+                  </Text>
+                </Pressable>
+                {showAndroidTimePicker && (
+                  <DateTimePicker value={pickerTime} mode="time" display="default" onChange={handlePickerChange} />
+                )}
+              </>
+            )}
             <Text style={styles.modalLabel}>Duration (minutes)</Text>
             <TextInput
               style={styles.input}
@@ -1390,6 +1412,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
+  // smallButton's flex: 1 only makes sense paired inside modalButtonRow
+  // (two buttons splitting the row). The real "blank button" bug found in
+  // MyTeamScreen.tsx (PR #67) was this same style used standalone — flex:
+  // 1 stretches it to fill the whole remaining column height instead.
+  // Applied here too since the new "Change time" button is standalone.
+  standaloneButton: { flex: 0 },
   smallButtonSecondary: {
     backgroundColor: 'transparent',
     borderWidth: 1,
