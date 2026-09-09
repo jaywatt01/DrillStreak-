@@ -211,12 +211,15 @@ create table drills (
   default_attempts integer,
   -- Added 2026-09-09, Jay's ask: a real growth metric for conditioning
   -- ("13-second sprints down to 10-second sprints") distinct from a rep
-  -- count. Per-drill, not a blanket category rule — this app's
-  -- conditioning category genuinely mixes rep-based drills (Suicides x 5)
-  -- and time-based ones (Jump rope, 10 min), and forcing one metric on
-  -- both would be wrong for half of them. When true, the result screen
-  -- shows a time field (completions.duration_seconds) instead of
-  -- makes/attempts.
+  -- count alone — a kid running the same 10 sprints every week proves
+  -- nothing about whether he's actually getting faster without a time
+  -- attached. Set true on every default conditioning drill (all 8) — a
+  -- per-drill flag, not a blanket category rule, since a future drill in
+  -- another category could conceivably want this too. When true, the
+  -- result screen logs reps AND time together (completions.attempts +
+  -- completions.duration_seconds, both optional) instead of makes/
+  -- attempts — same "two numbers together" shape shooting's makes/
+  -- attempts already has, so conditioning growth is just as visible.
   tracks_time boolean not null default false
 );
 
