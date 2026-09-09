@@ -134,6 +134,13 @@ export default function MyTeamScreen() {
   // Two-step assign flow: null = closed; a Drill = picking who ("Whole
   // Team" or specific players) for that drill.
   const [browsingDrills, setBrowsingDrills] = useState(false);
+  // 2026-09-09, Jay's ask: same wall-of-drills problem the player-facing
+  // Drills tab had, just contained in this popup instead of the whole
+  // screen — with the library past 26 drills, filters this flat list by
+  // category instead of always showing everything. Resets to "All" each
+  // time the picker opens (openBrowsingDrills below) so a stale filter
+  // from a previous assign doesn't quietly hide drills next time.
+  const [drillCategoryFilter, setDrillCategoryFilter] = useState<string | null>(null);
   const [pickingTargetFor, setPickingTargetFor] = useState<Drill | null>(null);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
@@ -744,7 +751,12 @@ export default function MyTeamScreen() {
           <View style={styles.summaryCard}>
             <View style={styles.summaryHeaderRow}>
               <Text style={styles.sectionTitle}>This week's assignments ({assignedDrills.length})</Text>
-              <Pressable onPress={() => setBrowsingDrills(true)}>
+              <Pressable
+                onPress={() => {
+                  setDrillCategoryFilter(null);
+                  setBrowsingDrills(true);
+                }}
+              >
                 <Text style={styles.summaryLink}>+ Assign</Text>
               </Pressable>
             </View>
@@ -1063,18 +1075,49 @@ export default function MyTeamScreen() {
               </Pressable>
             </View>
             <Text style={styles.placeholder}>Pick a drill, then choose who it's for.</Text>
+            {(() => {
+              const categories = Array.from(
+                new Set(availableDrills.map((d) => d.category).filter((c): c is string => !!c))
+              ).sort();
+              if (categories.length === 0) return null;
+              return (
+                <View style={styles.chipRow}>
+                  <Pressable
+                    style={[styles.chip, drillCategoryFilter === null && styles.chipSelected]}
+                    onPress={() => setDrillCategoryFilter(null)}
+                  >
+                    <Text style={[styles.chipText, drillCategoryFilter === null && styles.chipTextSelected]}>
+                      All
+                    </Text>
+                  </Pressable>
+                  {categories.map((cat) => (
+                    <Pressable
+                      key={cat}
+                      style={[styles.chip, drillCategoryFilter === cat && styles.chipSelected]}
+                      onPress={() => setDrillCategoryFilter(cat)}
+                    >
+                      <Text style={[styles.chipText, drillCategoryFilter === cat && styles.chipTextSelected]}>
+                        {cat}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })()}
             <ScrollView style={styles.popupScroll}>
-              {availableDrills.map((drill) => (
-                <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
-                  <View style={styles.drillRowMain}>
-                    <View style={styles.drillRowText}>
-                      <Text style={styles.drillName}>{drill.name}</Text>
-                      {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+              {availableDrills
+                .filter((drill) => drillCategoryFilter == null || drill.category === drillCategoryFilter)
+                .map((drill) => (
+                  <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
+                    <View style={styles.drillRowMain}>
+                      <View style={styles.drillRowText}>
+                        <Text style={styles.drillName}>{drill.name}</Text>
+                        {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+                      </View>
+                      <Text style={styles.assignTag}>Assign →</Text>
                     </View>
-                    <Text style={styles.assignTag}>Assign →</Text>
-                  </View>
-                </Pressable>
-              ))}
+                  </Pressable>
+                ))}
             </ScrollView>
           </View>
         </View>
@@ -1285,6 +1328,17 @@ const styles = StyleSheet.create({
   statsLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   noteLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
   messageLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 13, color: colors.text, fontWeight: '600' },
+  chipTextSelected: { color: '#FFFFFF' },
   drillRow: {
     borderWidth: 1,
     borderColor: colors.border,
