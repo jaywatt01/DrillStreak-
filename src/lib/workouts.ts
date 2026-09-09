@@ -1,5 +1,4 @@
 import { supabase } from './supabase';
-import { weekIndex } from './date';
 import { DRILL_SELECT_COLUMNS, Drill, mapDrillRow } from './players';
 
 // Every category currently present across the default library + a
@@ -38,39 +37,19 @@ export async function listAllDrills(playerId: string): Promise<Drill[]> {
   return (data ?? []).map(mapDrillRow);
 }
 
-// Quick Start — a small, stable-per-week set of suggested drills spanning
-// categories, for a player who wants to start something now without
-// browsing a category first. 2026-09-09, Jay's ask: with the library grown
-// past 26 drills, a fast "just give me something" path matters as much as
-// deliberate browsing does. Picked from the player's own already-loaded
-// allDrills (no extra query) — deterministic via the same weekIndex
-// rotation already used for video pools (pickRotatingVideo in
-// lib/players.ts), so it's the same suggestions for everyone until next
-// Monday, not re-randomized on every screen open. Tapping one just adds it
-// to the player's own list (selectDrillForPlayer) — it's a shortcut into
-// the same picker mechanism, not a separate one-tap-complete action.
-export function pickQuickStartDrills(allDrills: Drill[], count = 3): Drill[] {
-  if (allDrills.length === 0) return [];
-  const sorted = [...allDrills].sort((a, b) => a.id.localeCompare(b.id));
-  const offset = weekIndex();
-  const picked: Drill[] = [];
-  const seenCategories = new Set<string>();
-
-  // First pass: one per distinct category, for variety.
-  for (let i = 0; i < sorted.length && picked.length < count; i++) {
-    const d = sorted[(i + offset) % sorted.length];
-    const cat = d.category ?? '';
-    if (!seenCategories.has(cat)) {
-      seenCategories.add(cat);
-      picked.push(d);
-    }
-  }
-  // Fill any remaining slots if there weren't enough distinct categories.
-  for (let i = 0; i < sorted.length && picked.length < count; i++) {
-    const d = sorted[(i + offset) % sorted.length];
-    if (!picked.includes(d)) picked.push(d);
-  }
-  return picked;
+// Quick Start, 2026-09-09 v2 — real correction from Jay's on-device
+// feedback on v1 (which listed 3 full drill rows up top): with a 10-20
+// player roster, spending that much vertical space above the actual roster
+// list recreates the scroll fatigue this whole feature exists to avoid.
+// Now a category produces one random drill on tap instead of pre-listing
+// suggestions — same "give me something fast" intent, a fraction of the
+// footprint (one small chip per category instead of a full row each).
+// Re-tapping the same category re-rolls (no memory kept) rather than
+// showing the same pick twice in a row.
+export function pickRandomDrillFromCategory(allDrills: Drill[], category: string): Drill | null {
+  const inCategory = allDrills.filter((d) => d.category === category);
+  if (inCategory.length === 0) return null;
+  return inCategory[Math.floor(Math.random() * inCategory.length)];
 }
 
 export type WorkoutTemplate = {
