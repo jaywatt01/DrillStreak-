@@ -3,6 +3,15 @@ import { listSeasonHistory } from './seasons';
 
 export type FocusSuggestion = { category: string; pct: number; makes: number; attempts: number };
 
+// Conditioning has no percentage to weigh (reps + time, not makes/
+// attempts), so it can't share shootingPctByCategory's shape — this
+// counts how many conditioning completions from the last in-season
+// actually had a real reps or time logged (not just marked done with
+// nothing recorded), the volume-based signal that low tracking itself is
+// the offseason opportunity, same underlying "not enough real data yet"
+// spirit as the shooting suggestion's 5-attempt minimum.
+export type ConditioningFocusSuggestion = { trackedCount: number };
+
 // Groups every shooting-type completion (has both makes AND attempts —
 // same "shooting-type" test computeMakesAttemptsTotal in lib/players.ts
 // uses) by the drill's category, summing makes/attempts per category. A
@@ -52,4 +61,27 @@ export async function getOffseasonFocusSuggestion(playerId: string): Promise<Foc
     }
   }
   return weakest;
+}
+
+// Same "last closed in-season, real data only" grounding as the shooting
+// suggestion above, reframed for conditioning's different shape — see
+// ConditioningFocusSuggestion's comment. Returns null when there's no
+// prior season (nothing to check) or when the player already logged 5+
+// real conditioning results last season (already tracking it well, no
+// need to suggest it as a gap). Below 5 counts as under-tracked and
+// worth suggesting explicitly.
+export async function getConditioningFocusSuggestion(playerId: string): Promise<ConditioningFocusSuggestion | null> {
+  const history = await listSeasonHistory(playerId);
+  const lastInSeason = history.find((s) => !s.isOffseason);
+  if (!lastInSeason) return null;
+
+  const seasonHistory = await getCompletionHistory(playerId, lastInSeason.id);
+  let trackedCount = 0;
+  for (const entry of seasonHistory) {
+    for (const drill of entry.drills) {
+      if (drill.category !== 'conditioning') continue;
+      if (drill.attempts != null || drill.durationSeconds != null) trackedCount++;
+    }
+  }
+  return trackedCount < 5 ? { trackedCount } : null;
 }

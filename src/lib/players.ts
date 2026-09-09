@@ -423,6 +423,7 @@ export type CompletionHistoryDrill = {
   category: string | null;
   makes: number | null;
   attempts: number | null;
+  durationSeconds: number | null;
 };
 export type CompletionHistoryEntry = { date: string; drills: CompletionHistoryDrill[] };
 
@@ -437,7 +438,7 @@ export type CompletionHistoryEntry = { date: string; drills: CompletionHistoryDr
 export async function getCompletionHistory(playerId: string, seasonId?: string): Promise<CompletionHistoryEntry[]> {
   let query = supabase
     .from('completions')
-    .select('date, makes, attempts, drills(name, category)')
+    .select('date, makes, attempts, duration_seconds, drills(name, category)')
     .eq('player_id', playerId);
   if (seasonId) query = query.eq('season_id', seasonId);
   const { data, error } = await query.order('date', { ascending: false });
@@ -454,6 +455,7 @@ export async function getCompletionHistory(playerId: string, seasonId?: string):
       category: drill.category as string | null,
       makes: row.makes as number | null,
       attempts: row.attempts as number | null,
+      durationSeconds: row.duration_seconds as number | null,
     });
     byDate.set(date, existing);
   }
