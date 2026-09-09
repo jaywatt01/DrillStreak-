@@ -1126,7 +1126,7 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Your drills</Text>
             {drills.length === 0 ? (
               <Text style={styles.placeholder}>
-                No drills yet — tap + Add on a Quick Start drill above, or pick a category to browse and add more.
+                No drills yet — tap a Quick Start category above for something random, or pick a category below to browse and choose specific drills.
               </Text>
             ) : (
               drills.map((drill) => renderDrillRow(player.id, drill, promptForResults, completedToday))
