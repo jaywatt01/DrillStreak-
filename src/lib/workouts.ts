@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { weekIndex } from './date';
 import { DRILL_SELECT_COLUMNS, Drill, mapDrillRow } from './players';
 
 // Every category currently present across the default library + a
@@ -37,25 +38,39 @@ export async function listAllDrills(playerId: string): Promise<Drill[]> {
   return (data ?? []).map(mapDrillRow);
 }
 
-// The "what to work on today" suggestion — 2-3 drills matching a chosen
-// category, from the same visible-drill pool as the category list above.
-// `limit` defaults to 3 per the brainstormed "2-3 workouts in that area"
-// shape; category match is exact (drills already store one flat category
-// string, no sub-tagging), case-sensitive since listDrillCategories is the
-// only source of category values a chip UI would ever pass in here.
-export async function getSuggestedDrillsForCategory(
-  playerId: string,
-  category: string,
-  limit = 3
-): Promise<Drill[]> {
-  const { data, error } = await supabase
-    .from('drills')
-    .select(DRILL_SELECT_COLUMNS)
-    .or(`is_default.eq.true,player_id.eq.${playerId}`)
-    .eq('category', category)
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []).map(mapDrillRow);
+// Quick Start — a small, stable-per-week set of suggested drills spanning
+// categories, for a player who wants to start something now without
+// browsing a category first. 2026-09-09, Jay's ask: with the library grown
+// past 26 drills, a fast "just give me something" path matters as much as
+// deliberate browsing does. Picked from the player's own already-loaded
+// allDrills (no extra query) — deterministic via the same weekIndex
+// rotation already used for video pools (pickRotatingVideo in
+// lib/players.ts), so it's the same suggestions for everyone until next
+// Monday, not re-randomized on every screen open. Tapping one just adds it
+// to the player's own list (selectDrillForPlayer) — it's a shortcut into
+// the same picker mechanism, not a separate one-tap-complete action.
+export function pickQuickStartDrills(allDrills: Drill[], count = 3): Drill[] {
+  if (allDrills.length === 0) return [];
+  const sorted = [...allDrills].sort((a, b) => a.id.localeCompare(b.id));
+  const offset = weekIndex();
+  const picked: Drill[] = [];
+  const seenCategories = new Set<string>();
+
+  // First pass: one per distinct category, for variety.
+  for (let i = 0; i < sorted.length && picked.length < count; i++) {
+    const d = sorted[(i + offset) % sorted.length];
+    const cat = d.category ?? '';
+    if (!seenCategories.has(cat)) {
+      seenCategories.add(cat);
+      picked.push(d);
+    }
+  }
+  // Fill any remaining slots if there weren't enough distinct categories.
+  for (let i = 0; i < sorted.length && picked.length < count; i++) {
+    const d = sorted[(i + offset) % sorted.length];
+    if (!picked.includes(d)) picked.push(d);
+  }
+  return picked;
 }
 
 export type WorkoutTemplate = {

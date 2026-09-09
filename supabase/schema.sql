@@ -1673,6 +1673,31 @@ create policy scheduled_drills_owner_access on scheduled_drills
   using (is_player_owner_or_guardian(scheduled_drills.player_id, auth.uid()));
 
 -- ---------------------------------------------------------------------------
+-- player_drill_selections: 2026-09-09, Jay's ask — with the drill library
+-- grown past 26 entries, HomeScreen's "Drill library" fallback (shown when
+-- a player has no team assignment this week) was dumping the entire
+-- library on the player at once. This table is what a player picks from a
+-- category's full drill list to actually work on, replacing that
+-- fallback; getWeeklyDrills merges it with any coach assignments rather
+-- than one overriding the other, per Jay's explicit confirmation. Owner-
+-- only, same reasoning as scheduled_drills above — a personal choice, not
+-- coach-visible accountability data.
+-- ---------------------------------------------------------------------------
+create table player_drill_selections (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  drill_id uuid not null references drills(id) on delete cascade,
+  selected_at timestamptz not null default now(),
+  unique (player_id, drill_id)
+);
+
+alter table player_drill_selections enable row level security;
+
+create policy player_drill_selections_owner_access on player_drill_selections
+  for all
+  using (is_player_owner_or_guardian(player_drill_selections.player_id, auth.uid()));
+
+-- ---------------------------------------------------------------------------
 -- push_tokens: one row per device/token, registered client-side once a user
 -- grants notification permission. Fanout (which tokens get notified about
 -- which new team_messages/team_events row) happens in the

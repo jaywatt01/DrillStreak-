@@ -281,7 +281,15 @@ export async function addCustomDrill(
 // time/duration for this week's assignment when there is one (team
 // source only — a library drill has no per-assignment schedule, just
 // whatever estimatedMinutes is set on the drill itself).
-export type WeeklyDrill = Drill & { scheduledTime: string | null; scheduledDurationMinutes: number | null };
+export type WeeklyDrill = Drill & {
+  scheduledTime: string | null;
+  scheduledDurationMinutes: number | null;
+  // true for a coach assignment, false for a drill the player picked
+  // themselves via player_drill_selections — HomeScreen uses this to show
+  // an "Assigned" label and to only offer long-press-to-remove on the
+  // player's own picks, never on something a coach assigned.
+  assigned: boolean;
+};
 
 // Picks which video shows this week from a drill's candidate pool,
 // deterministically — same pick for everyone until the following Monday,
@@ -319,9 +327,17 @@ async function applyVideoRotation(drills: WeeklyDrill[]): Promise<WeeklyDrill[]>
   });
 }
 
-export async function getWeeklyDrills(
-  playerId: string
-): Promise<{ drills: WeeklyDrill[]; source: 'team' | 'library' }> {
+// 2026-09-09: was "assignments this week if any exist, else the ENTIRE
+// drill library" — once the library grew past 26 drills, that fallback
+// dumped everything on a player with no assignment. Now merges two real
+// sources instead of one replacing the other, per Jay's explicit call:
+// coach assignments AND whatever the player has deliberately picked via
+// player_drill_selections (HomeScreen's category picker / Quick Start) —
+// a player with 2 assigned and 3 self-picked drills sees all 5, not one
+// list or the other. An assignment wins on id collision (rare — same
+// drill both assigned and self-picked) so its coach-set schedule isn't
+// lost.
+export async function getWeeklyDrills(playerId: string): Promise<{ drills: WeeklyDrill[] }> {
   const { data: memberships, error: membershipError } = await supabase
     .from('team_memberships')
     .select('team_id')
@@ -330,6 +346,7 @@ export async function getWeeklyDrills(
 
   const teamIds = (memberships ?? []).map((m) => m.team_id);
 
+  let assignedDrills: WeeklyDrill[] = [];
   if (teamIds.length > 0) {
     // Picks up both team-wide assignments (player_id null) and anything
     // targeted specifically at this player — per-player assignment, Jay's
@@ -346,7 +363,7 @@ export async function getWeeklyDrills(
       .or(`player_id.is.null,player_id.eq.${playerId}`);
     if (assignmentError) throw assignmentError;
 
-    const drills = (assignments ?? [])
+    assignedDrills = (assignments ?? [])
       .flatMap((a) => {
         const drillRow = Array.isArray(a.drills) ? a.drills[0] : a.drills;
         if (!drillRow) return [];
@@ -355,34 +372,37 @@ export async function getWeeklyDrills(
             ...mapDrillRow(drillRow),
             scheduledTime: a.scheduled_time as string | null,
             scheduledDurationMinutes: a.duration_minutes as number | null,
+            assigned: true,
           },
         ];
       })
       .filter((d): d is WeeklyDrill => d != null);
-
-    const deduped = Array.from(new Map(drills.map((d) => [d.id, d])).values());
-    if (deduped.length > 0) {
-      return { drills: await applyVideoRotation(deduped), source: 'team' };
-    }
   }
 
-  const { data: libraryDrills, error: libraryError } = await supabase
-    .from('drills')
-    .select(DRILL_SELECT_COLUMNS)
-    .or(`is_default.eq.true,player_id.eq.${playerId}`)
-    .order('category');
-  if (libraryError) throw libraryError;
+  const { data: selectionRows, error: selectionError } = await supabase
+    .from('player_drill_selections')
+    .select(`drills(${DRILL_SELECT_COLUMNS})`)
+    .eq('player_id', playerId);
+  if (selectionError) throw selectionError;
 
-  const libraryResult: WeeklyDrill[] = (libraryDrills ?? []).map((row) => ({
-    ...mapDrillRow(row),
-    scheduledTime: null,
-    scheduledDurationMinutes: null,
-  }));
+  const selectedDrills: WeeklyDrill[] = (selectionRows ?? []).flatMap((row) => {
+    const drillRow = Array.isArray(row.drills) ? row.drills[0] : row.drills;
+    if (!drillRow) return [];
+    return [
+      {
+        ...mapDrillRow(drillRow),
+        scheduledTime: null as string | null,
+        scheduledDurationMinutes: null as number | null,
+        assigned: false,
+      },
+    ];
+  });
 
-  return {
-    drills: await applyVideoRotation(libraryResult),
-    source: 'library',
-  };
+  const merged = new Map<string, WeeklyDrill>();
+  for (const d of selectedDrills) merged.set(d.id, d);
+  for (const d of assignedDrills) merged.set(d.id, d);
+
+  return { drills: await applyVideoRotation(Array.from(merged.values())) };
 }
 
 export type CompletionHistoryDrill = {
