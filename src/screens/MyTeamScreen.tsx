@@ -136,10 +136,12 @@ export default function MyTeamScreen() {
   const [browsingDrills, setBrowsingDrills] = useState(false);
   // 2026-09-09, Jay's ask: same wall-of-drills problem the player-facing
   // Drills tab had, just contained in this popup instead of the whole
-  // screen — with the library past 26 drills, filters this flat list by
-  // category instead of always showing everything. Resets to "All" each
-  // time the picker opens (openBrowsingDrills below) so a stale filter
-  // from a previous assign doesn't quietly hide drills next time.
+  // screen. No "All" option, deliberately — Jay's own call, since an "All"
+  // chip would just recreate the full unfiltered wall of drills one tap
+  // away, defeating the point. Null means no category picked yet, so
+  // nothing shows until the coach picks one. Reset to null each time the
+  // picker opens so a stale filter from a previous assign doesn't carry
+  // over.
   const [drillCategoryFilter, setDrillCategoryFilter] = useState<string | null>(null);
   const [pickingTargetFor, setPickingTargetFor] = useState<Drill | null>(null);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
@@ -1074,7 +1076,7 @@ export default function MyTeamScreen() {
                 <Text style={styles.popupCloseText}>Cancel</Text>
               </Pressable>
             </View>
-            <Text style={styles.placeholder}>Pick a drill, then choose who it's for.</Text>
+            <Text style={styles.placeholder}>Pick a category, then a drill, then choose who it's for.</Text>
             {(() => {
               const categories = Array.from(
                 new Set(availableDrills.map((d) => d.category).filter((c): c is string => !!c))
@@ -1082,14 +1084,6 @@ export default function MyTeamScreen() {
               if (categories.length === 0) return null;
               return (
                 <View style={styles.chipRow}>
-                  <Pressable
-                    style={[styles.chip, drillCategoryFilter === null && styles.chipSelected]}
-                    onPress={() => setDrillCategoryFilter(null)}
-                  >
-                    <Text style={[styles.chipText, drillCategoryFilter === null && styles.chipTextSelected]}>
-                      All
-                    </Text>
-                  </Pressable>
                   {categories.map((cat) => (
                     <Pressable
                       key={cat}
@@ -1104,21 +1098,25 @@ export default function MyTeamScreen() {
                 </View>
               );
             })()}
-            <ScrollView style={styles.popupScroll}>
-              {availableDrills
-                .filter((drill) => drillCategoryFilter == null || drill.category === drillCategoryFilter)
-                .map((drill) => (
-                  <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
-                    <View style={styles.drillRowMain}>
-                      <View style={styles.drillRowText}>
-                        <Text style={styles.drillName}>{drill.name}</Text>
-                        {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+            {drillCategoryFilter == null ? (
+              <Text style={styles.placeholder}>Pick a category above to see its drills.</Text>
+            ) : (
+              <ScrollView style={styles.popupScroll}>
+                {availableDrills
+                  .filter((drill) => drill.category === drillCategoryFilter)
+                  .map((drill) => (
+                    <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
+                      <View style={styles.drillRowMain}>
+                        <View style={styles.drillRowText}>
+                          <Text style={styles.drillName}>{drill.name}</Text>
+                          {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+                        </View>
+                        <Text style={styles.assignTag}>Assign →</Text>
                       </View>
-                      <Text style={styles.assignTag}>Assign →</Text>
-                    </View>
-                  </Pressable>
-                ))}
-            </ScrollView>
+                    </Pressable>
+                  ))}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
