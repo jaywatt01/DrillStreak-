@@ -102,13 +102,21 @@ function daysLeft(endsAt: string | null): number {
 
 // "8/10" if both are set, "8 reps" if just a rep count was logged, null
 // if no result was logged for this completion at all.
+function formatTime(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+}
+
 function formatResult(result: DrillResult | undefined): string | null {
   if (!result) return null;
-  if (result.durationSeconds != null) {
-    const minutes = Math.floor(result.durationSeconds / 60);
-    const seconds = result.durationSeconds % 60;
-    return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+  // Conditioning logs reps and time together (how many, how fast) — show
+  // both when both are there, same "two numbers together" shape shooting's
+  // makes/attempts already has.
+  if (result.attempts != null && result.durationSeconds != null) {
+    return `${result.attempts} reps · ${formatTime(result.durationSeconds)}`;
   }
+  if (result.durationSeconds != null) return formatTime(result.durationSeconds);
   if (result.makes != null && result.attempts != null) return `${result.makes}/${result.attempts}`;
   if (result.attempts != null) return `${result.attempts} reps`;
   return null;
@@ -603,8 +611,11 @@ export default function HomeScreen() {
     if (!loggingResultFor) return;
     const invalid = (raw: string, parsed: number | null) => raw.trim() && (!Number.isFinite(parsed) || (parsed as number) < 0);
     const tracksTime = loggingResultFor.drill.tracksTime;
+    // A tracks_time (conditioning) drill logs reps AND time together — how
+    // many he ran, how fast — so growth shows the same way it does for
+    // shooting's makes/attempts. Makes never applies to conditioning.
     const makes = tracksTime || !resultMakes.trim() ? null : parseInt(resultMakes, 10);
-    const attempts = tracksTime || !resultAttempts.trim() ? null : parseInt(resultAttempts, 10);
+    const attempts = !resultAttempts.trim() ? null : parseInt(resultAttempts, 10);
     const duration = tracksTime && resultDuration.trim() ? parseInt(resultDuration, 10) : null;
     if (
       invalid(resultMakes, makes) ||
@@ -1328,10 +1339,21 @@ export default function HomeScreen() {
             {loggingResultFor?.drill.tracksTime ? (
               <>
                 <Text style={styles.modalHint}>
-                  Optional — log how long it took. Editable, so it's fine if
-                  there's a few seconds' lag getting to the phone to stop
-                  timing after a solo drill. Leave blank to skip.
+                  Optional — how many he ran and how long it took, so
+                  progress shows over time the same way makes/attempts does
+                  for shooting. Time's editable, so it's fine if there's a
+                  few seconds' lag reaching the phone to stop timing after a
+                  solo drill. Leave either blank to skip.
                 </Text>
+                <Text style={styles.modalLabel}>Reps</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textMuted}
+                  value={resultAttempts}
+                  onChangeText={setResultAttempts}
+                />
                 <Text style={styles.modalLabel}>Time (seconds)</Text>
                 <TextInput
                   style={styles.input}
