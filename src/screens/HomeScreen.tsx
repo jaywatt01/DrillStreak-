@@ -45,7 +45,12 @@ import { recordScheduledDrill, recordScheduledDrillCalendarEvent } from '../lib/
 import { mondayOfThisWeek } from '../lib/date';
 import { getPlayerTeams, getPromptForResultsForPlayer } from '../lib/team';
 import { getActiveSeason, Season } from '../lib/seasons';
-import { FocusSuggestion, getOffseasonFocusSuggestion } from '../lib/offseasonPlan';
+import {
+  ConditioningFocusSuggestion,
+  FocusSuggestion,
+  getConditioningFocusSuggestion,
+  getOffseasonFocusSuggestion,
+} from '../lib/offseasonPlan';
 import {
   acceptChallenge,
   Challenge,
@@ -83,6 +88,7 @@ type PlayerCardData = {
   activeSeason: Season | null;
   weeklyGoalCount: number;
   focusSuggestion: FocusSuggestion | null;
+  conditioningFocusSuggestion: ConditioningFocusSuggestion | null;
   completedToday: Map<string, DrillResult>;
   promptForResults: boolean;
   challenges: Challenge[];
@@ -356,6 +362,9 @@ export default function HomeScreen() {
           const streak = isOffseason ? 0 : calculateStreak(dates);
           const graceUsed = isOffseason ? false : wasStreakGraceUsed(dates);
           const focusSuggestion = isOffseason ? await getOffseasonFocusSuggestion(player.id) : null;
+          const conditioningFocusSuggestion = isOffseason
+            ? await getConditioningFocusSuggestion(player.id)
+            : null;
 
           // Award-then-list, in that order, so a badge earned by this very
           // load (a streak that just crossed a milestone, a challenge that
@@ -388,6 +397,7 @@ export default function HomeScreen() {
             activeSeason,
             weeklyGoalCount,
             focusSuggestion,
+            conditioningFocusSuggestion,
             completedToday,
             promptForResults,
             challenges,
@@ -943,6 +953,7 @@ export default function HomeScreen() {
             activeSeason,
             weeklyGoalCount,
             focusSuggestion,
+            conditioningFocusSuggestion,
             completedToday,
             promptForResults,
             challenges,
@@ -1016,6 +1027,13 @@ export default function HomeScreen() {
                     completed a full in-season with at least 5 shots logged in one category.
                   </Text>
                 )}
+                {conditioningFocusSuggestion ? (
+                  <Text style={[styles.focusBody, { marginTop: 6 }]}>
+                    Conditioning was tracked with real reps/time only {conditioningFocusSuggestion.trackedCount}{' '}
+                    {conditioningFocusSuggestion.trackedCount === 1 ? 'time' : 'times'} last season — a good
+                    offseason focus, so there's real data to show growth against next season.
+                  </Text>
+                ) : null}
               </View>
             ) : null}
 
