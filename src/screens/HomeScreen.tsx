@@ -212,6 +212,29 @@ export default function HomeScreen() {
   // card — same shape as markingId/addingToCalendarId elsewhere here.
   const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
 
+  // Quick Start is one shared shortcut shown once above every player's
+  // card, not repeated per player — 2026-09-09 correction, Jay caught it
+  // on-device (the first version duplicated the identical suggestions
+  // under each player, exactly the clutter this whole feature exists to
+  // avoid). Adding one broadcasts it to every player on the account in one
+  // tap rather than asking which player it's for — still idempotent per
+  // player via selectDrillForPlayer's own upsert, so re-tapping is safe.
+  const handleToggleQuickStart = async (drillId: string, alreadyAddedToAll: boolean) => {
+    setPendingSelectionId(drillId);
+    try {
+      if (alreadyAddedToAll) {
+        await Promise.all(cards.map((c) => deselectDrillForPlayer(c.player.id, drillId)));
+      } else {
+        await Promise.all(cards.map((c) => selectDrillForPlayer(c.player.id, drillId)));
+      }
+      await load();
+    } catch (e) {
+      Alert.alert('Could not update', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setPendingSelectionId(null);
+    }
+  };
+
   const handleToggleSelection = async (playerId: string, drillId: string, currentlySelected: boolean) => {
     setPendingSelectionId(drillId);
     try {
@@ -830,6 +853,40 @@ export default function HomeScreen() {
     >
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      {cards.length > 0 ? (() => {
+        const quickStartDrills = pickQuickStartDrills(cards[0]?.allDrills ?? []);
+        if (quickStartDrills.length === 0) return null;
+        return (
+          <View style={styles.challengesSection}>
+            <Text style={styles.sectionTitle}>Quick Start</Text>
+            {quickStartDrills.map((d) => {
+              const addedToAll = cards.every((c) => c.drills.some((cd) => !cd.assigned && cd.id === d.id));
+              return (
+                <View key={d.id} style={[styles.drillRow, { paddingLeft: 14, paddingVertical: 12 }]}>
+                  <View style={styles.drillRowText}>
+                    <Text style={styles.drillName}>{d.name}</Text>
+                    {d.category ? <Text style={styles.drillCategory}>{d.category}</Text> : null}
+                  </View>
+                  <Pressable
+                    onPress={() => handleToggleQuickStart(d.id, addedToAll)}
+                    disabled={pendingSelectionId === d.id}
+                    hitSlop={8}
+                  >
+                    {pendingSelectionId === d.id ? (
+                      <ActivityIndicator color={colors.primary} size="small" />
+                    ) : (
+                      <Text style={addedToAll ? styles.checkDone : styles.checkPending}>
+                        {addedToAll ? '✓ Added' : '+ Add'}
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        );
+      })() : null}
+
       {cards.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.sectionTitle}>No players yet</Text>
@@ -863,8 +920,6 @@ export default function HomeScreen() {
             badges,
             teams,
           }) => {
-            const quickStartDrills = pickQuickStartDrills(allDrills);
-            const selectedIds = new Set(drills.filter((d) => !d.assigned).map((d) => d.id));
             const isOffseason = activeSeason?.isOffseason ?? false;
             const WEEKLY_GOAL_TARGET = 4;
             return (
@@ -1042,36 +1097,6 @@ export default function HomeScreen() {
                 <Text style={styles.challengeButtonText}>+ Challenge a teammate</Text>
               </Pressable>
             </View>
-
-            {quickStartDrills.length > 0 ? (
-              <>
-                <Text style={styles.sectionTitle}>Quick Start</Text>
-                {quickStartDrills.map((d) => {
-                  const selected = selectedIds.has(d.id);
-                  return (
-                    <View key={d.id} style={[styles.drillRow, { paddingLeft: 14, paddingVertical: 12 }]}>
-                      <View style={styles.drillRowText}>
-                        <Text style={styles.drillName}>{d.name}</Text>
-                        {d.category ? <Text style={styles.drillCategory}>{d.category}</Text> : null}
-                      </View>
-                      <Pressable
-                        onPress={() => handleToggleSelection(player.id, d.id, selected)}
-                        disabled={pendingSelectionId === d.id}
-                        hitSlop={8}
-                      >
-                        {pendingSelectionId === d.id ? (
-                          <ActivityIndicator color={colors.primary} size="small" />
-                        ) : (
-                          <Text style={selected ? styles.checkDone : styles.checkPending}>
-                            {selected ? '✓ Added' : '+ Add'}
-                          </Text>
-                        )}
-                      </Pressable>
-                    </View>
-                  );
-                })}
-              </>
-            ) : null}
 
             <Text style={styles.sectionTitle}>What to work on today</Text>
             <View style={styles.chipRow}>
