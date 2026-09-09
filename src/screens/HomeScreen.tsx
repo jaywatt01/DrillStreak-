@@ -207,33 +207,16 @@ export default function HomeScreen() {
   // the picker itself reads straight from that player's already-loaded
   // allDrills, filtered by category — no extra query needed.
   const [categoryPickerFor, setCategoryPickerFor] = useState<{ playerId: string; category: string } | null>(null);
+  // Which Quick Start drill's player-picker is open — 2026-09-09
+  // correction, Jay's real reasoning: a household with kids at different
+  // ages/skill levels shouldn't get the same suggestion auto-applied to
+  // everyone. Tapping a Quick Start drill opens this picker to choose
+  // which player(s) it's actually for, instead of broadcasting to all.
+  const [quickStartPickerFor, setQuickStartPickerFor] = useState<Drill | null>(null);
   // Tracks the one drill/workout currently being added or removed, so its
   // own row can show a spinner without blocking every other row on the
   // card — same shape as markingId/addingToCalendarId elsewhere here.
   const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
-
-  // Quick Start is one shared shortcut shown once above every player's
-  // card, not repeated per player — 2026-09-09 correction, Jay caught it
-  // on-device (the first version duplicated the identical suggestions
-  // under each player, exactly the clutter this whole feature exists to
-  // avoid). Adding one broadcasts it to every player on the account in one
-  // tap rather than asking which player it's for — still idempotent per
-  // player via selectDrillForPlayer's own upsert, so re-tapping is safe.
-  const handleToggleQuickStart = async (drillId: string, alreadyAddedToAll: boolean) => {
-    setPendingSelectionId(drillId);
-    try {
-      if (alreadyAddedToAll) {
-        await Promise.all(cards.map((c) => deselectDrillForPlayer(c.player.id, drillId)));
-      } else {
-        await Promise.all(cards.map((c) => selectDrillForPlayer(c.player.id, drillId)));
-      }
-      await load();
-    } catch (e) {
-      Alert.alert('Could not update', e instanceof Error ? e.message : 'Something went wrong.');
-    } finally {
-      setPendingSelectionId(null);
-    }
-  };
 
   const handleToggleSelection = async (playerId: string, drillId: string, currentlySelected: boolean) => {
     setPendingSelectionId(drillId);
@@ -860,27 +843,34 @@ export default function HomeScreen() {
           <View style={styles.challengesSection}>
             <Text style={styles.sectionTitle}>Quick Start</Text>
             {quickStartDrills.map((d) => {
-              const addedToAll = cards.every((c) => c.drills.some((cd) => !cd.assigned && cd.id === d.id));
+              const addedForSome = cards.some((c) => c.drills.some((cd) => !cd.assigned && cd.id === d.id));
               return (
-                <View key={d.id} style={[styles.drillRow, { paddingLeft: 14, paddingVertical: 12 }]}>
+                <Pressable
+                  key={d.id}
+                  style={[styles.drillRow, { paddingLeft: 14, paddingVertical: 12 }]}
+                  onPress={() => {
+                    // Only one player on the account — no real choice to
+                    // make, so skip the picker and just toggle directly.
+                    if (cards.length === 1) {
+                      handleToggleSelection(cards[0].player.id, d.id, addedForSome);
+                    } else {
+                      setQuickStartPickerFor(d);
+                    }
+                  }}
+                  disabled={pendingSelectionId === d.id}
+                >
                   <View style={styles.drillRowText}>
                     <Text style={styles.drillName}>{d.name}</Text>
                     {d.category ? <Text style={styles.drillCategory}>{d.category}</Text> : null}
                   </View>
-                  <Pressable
-                    onPress={() => handleToggleQuickStart(d.id, addedToAll)}
-                    disabled={pendingSelectionId === d.id}
-                    hitSlop={8}
-                  >
-                    {pendingSelectionId === d.id ? (
-                      <ActivityIndicator color={colors.primary} size="small" />
-                    ) : (
-                      <Text style={addedToAll ? styles.checkDone : styles.checkPending}>
-                        {addedToAll ? '✓ Added' : '+ Add'}
-                      </Text>
-                    )}
-                  </Pressable>
-                </View>
+                  {pendingSelectionId === d.id ? (
+                    <ActivityIndicator color={colors.primary} size="small" />
+                  ) : (
+                    <Text style={addedForSome ? styles.checkDone : styles.checkPending}>
+                      {addedForSome ? '✓ Added' : '+ Add'}
+                    </Text>
+                  )}
+                </Pressable>
               );
             })}
           </View>
@@ -1153,6 +1143,48 @@ export default function HomeScreen() {
           }
         )
       )}
+
+      <Modal
+        visible={quickStartPickerFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setQuickStartPickerFor(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Add "{quickStartPickerFor?.name}" for…</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {cards.map((c) => {
+                if (!quickStartPickerFor) return null;
+                const selected = c.drills.some((cd) => !cd.assigned && cd.id === quickStartPickerFor.id);
+                return (
+                  <Pressable
+                    key={c.player.id}
+                    style={styles.pickerDrillRow}
+                    onPress={() => handleToggleSelection(c.player.id, quickStartPickerFor.id, selected)}
+                    disabled={pendingSelectionId === quickStartPickerFor.id}
+                  >
+                    <Text style={[styles.drillName, { flex: 1 }]}>{c.player.display_name}</Text>
+                    {pendingSelectionId === quickStartPickerFor.id ? (
+                      <ActivityIndicator color={colors.primary} size="small" />
+                    ) : (
+                      <Text style={selected ? styles.checkDone : styles.checkPending}>
+                        {selected ? '✓ Added' : '+ Add'}
+                      </Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable
+              style={[styles.smallButton, styles.standaloneButton]}
+              onPress={() => setQuickStartPickerFor(null)}
+            >
+              <Text style={styles.smallButtonText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={categoryPickerFor != null}
