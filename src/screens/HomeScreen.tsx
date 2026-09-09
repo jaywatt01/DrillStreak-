@@ -67,17 +67,17 @@ import {
 import { hasSharedBadgeSince, shareBadgeToTeam } from '../lib/teamMessages';
 import {
   deleteWorkoutTemplate,
-  getSuggestedDrillsForCategory,
   listAllDrills,
   listDrillCategories,
   listWorkoutTemplates,
+  pickQuickStartDrills,
   WorkoutTemplate,
 } from '../lib/workouts';
+import { deselectDrillForPlayer, selectDrillForPlayer } from '../lib/drillSelections';
 
 type PlayerCardData = {
   player: Player;
   drills: WeeklyDrill[];
-  source: 'team' | 'library';
   streak: number;
   graceUsed: boolean;
   activeSeason: Season | null;
@@ -92,14 +92,6 @@ type PlayerCardData = {
   badges: Badge[];
   teams: { id: string; name: string }[];
 };
-
-// A Drill (from a category suggestion or a saved workout template) turned
-// into a WeeklyDrill-shaped row so it can reuse every existing mark-
-// done/record/schedule control below — those two sources never carry a
-// coach-set schedule, so both fields are just null.
-function asWeeklyDrill(drill: Drill): WeeklyDrill {
-  return { ...drill, scheduledTime: null, scheduledDurationMinutes: null };
-}
 
 // Only meaningful once a challenge is accepted (endsAt set) — pending
 // challenges never call this.
@@ -207,29 +199,49 @@ export default function HomeScreen() {
   // assignment list can easily have zero drills in a picked category, and
   // Jay's ask was "suggests 2-3 workouts in that area", not "filters what's
   // already there").
-  const [activeSuggestion, setActiveSuggestion] = useState<
-    Record<string, { label: string; drills: Drill[] } | undefined>
-  >({});
-  const [loadingSuggestionFor, setLoadingSuggestionFor] = useState<string | null>(null);
+  // 2026-09-09: replaces the old ephemeral "Suggested: category" overlay
+  // (2-3 drills, shown in-memory, gone on reload) — a category chip now
+  // opens a real picker over the category's full drill list, and picking
+  // one persists it (player_drill_selections) instead of just displaying
+  // it. categoryPickerFor tracks which player/category picker is open;
+  // the picker itself reads straight from that player's already-loaded
+  // allDrills, filtered by category — no extra query needed.
+  const [categoryPickerFor, setCategoryPickerFor] = useState<{ playerId: string; category: string } | null>(null);
+  // Tracks the one drill/workout currently being added or removed, so its
+  // own row can show a spinner without blocking every other row on the
+  // card — same shape as markingId/addingToCalendarId elsewhere here.
+  const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
 
-  const handlePickCategory = async (playerId: string, category: string) => {
-    setLoadingSuggestionFor(playerId);
+  const handleToggleSelection = async (playerId: string, drillId: string, currentlySelected: boolean) => {
+    setPendingSelectionId(drillId);
     try {
-      const suggested = await getSuggestedDrillsForCategory(playerId, category);
-      setActiveSuggestion((current) => ({ ...current, [playerId]: { label: category, drills: suggested } }));
+      if (currentlySelected) {
+        await deselectDrillForPlayer(playerId, drillId);
+      } else {
+        await selectDrillForPlayer(playerId, drillId);
+      }
+      await load();
     } catch (e) {
-      Alert.alert('Could not load suggestions', e instanceof Error ? e.message : 'Something went wrong.');
+      Alert.alert('Could not update your list', e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
-      setLoadingSuggestionFor(null);
+      setPendingSelectionId(null);
     }
   };
 
-  const handlePickWorkout = (playerId: string, template: WorkoutTemplate) => {
-    setActiveSuggestion((current) => ({ ...current, [playerId]: { label: template.name, drills: template.drills } }));
-  };
-
-  const clearSuggestion = (playerId: string) => {
-    setActiveSuggestion((current) => ({ ...current, [playerId]: undefined }));
+  // Adding a saved workout now bulk-selects every drill in it (persisted)
+  // rather than showing it as a temporary overlay — the workout chip
+  // becomes a shortcut into the same selection mechanism as the category
+  // picker and Quick Start, not a third, differently-behaved display mode.
+  const handlePickWorkout = async (playerId: string, template: WorkoutTemplate) => {
+    setPendingSelectionId(template.id);
+    try {
+      await Promise.all(template.drills.map((d) => selectDrillForPlayer(playerId, d.id)));
+      await load();
+    } catch (e) {
+      Alert.alert('Could not add workout', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setPendingSelectionId(null);
+    }
   };
 
   // Real gap Jay caught: the only way to delete a saved workout was to
@@ -247,10 +259,32 @@ export default function HomeScreen() {
         onPress: async () => {
           try {
             await deleteWorkoutTemplate(template.id);
-            if (activeSuggestion[playerId]?.label === template.name) clearSuggestion(playerId);
             await load();
           } catch (e) {
             Alert.alert('Could not delete workout', e instanceof Error ? e.message : 'Something went wrong.');
+          }
+        },
+      },
+    ]);
+  };
+
+  // Long-press on a self-picked drill row to take it off the list — never
+  // offered on a coach-assigned one (drill.assigned), since that's the
+  // coach's call, not the player's. Doesn't touch completion history at
+  // all (player_drill_selections and completions are unrelated tables) —
+  // this just changes what shows up going forward.
+  const handleRemoveSelection = (playerId: string, drill: WeeklyDrill) => {
+    Alert.alert(`Remove "${drill.name}" from your list?`, "This won't affect anything you've already logged.", [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deselectDrillForPlayer(playerId, drill.id);
+            await load();
+          } catch (e) {
+            Alert.alert('Could not remove', e instanceof Error ? e.message : 'Something went wrong.');
           }
         },
       },
@@ -264,7 +298,7 @@ export default function HomeScreen() {
       const cardData = await Promise.all(
         players.map(async (player) => {
           const [
-            { drills, source },
+            { drills },
             completedToday,
             promptForResults,
             challenges,
@@ -329,7 +363,6 @@ export default function HomeScreen() {
           return {
             player,
             drills,
-            source,
             streak,
             graceUsed,
             activeSeason,
@@ -696,11 +729,10 @@ export default function HomeScreen() {
     }
   };
 
-  // Extracted so the same row (mark done, video, record, result, undo,
-  // schedule) renders identically whether it came from the normal
-  // assigned/library list or from a category/workout suggestion — those
-  // two sources are just a different set of drills feeding the exact same
-  // controls, not a different interaction.
+  // Every row in "Your drills" (whether coach-assigned or self-picked)
+  // renders through here, so mark done/video/record/result/undo/schedule
+  // all behave identically regardless of which of the two merged sources
+  // a drill came from.
   const renderDrillRow = (
     playerId: string,
     drill: WeeklyDrill,
@@ -714,11 +746,16 @@ export default function HomeScreen() {
         <Pressable
           style={styles.drillRowMain}
           onPress={() => handleMarkComplete(playerId, drill, promptForResults)}
+          onLongPress={!drill.assigned ? () => handleRemoveSelection(playerId, drill) : undefined}
           disabled={markingId === drill.id || done}
         >
           <View style={styles.drillRowText}>
             <Text style={styles.drillName}>{drill.name}</Text>
-            {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+            {drill.category || drill.assigned ? (
+              <Text style={styles.drillCategory}>
+                {[drill.category, drill.assigned ? 'Assigned' : null].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
           </View>
           {markingId === drill.id ? (
             <ActivityIndicator color={colors.primary} />
@@ -812,7 +849,6 @@ export default function HomeScreen() {
           ({
             player,
             drills,
-            source,
             streak,
             graceUsed,
             activeSeason,
@@ -827,7 +863,8 @@ export default function HomeScreen() {
             badges,
             teams,
           }) => {
-            const suggestion = activeSuggestion[player.id];
+            const quickStartDrills = pickQuickStartDrills(allDrills);
+            const selectedIds = new Set(drills.filter((d) => !d.assigned).map((d) => d.id));
             const isOffseason = activeSeason?.isOffseason ?? false;
             const WEEKLY_GOAL_TARGET = 4;
             return (
@@ -1006,72 +1043,141 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
+            {quickStartDrills.length > 0 ? (
+              <>
+                <Text style={styles.sectionTitle}>Quick Start</Text>
+                {quickStartDrills.map((d) => {
+                  const selected = selectedIds.has(d.id);
+                  return (
+                    <View key={d.id} style={[styles.drillRow, { paddingLeft: 14, paddingVertical: 12 }]}>
+                      <View style={styles.drillRowText}>
+                        <Text style={styles.drillName}>{d.name}</Text>
+                        {d.category ? <Text style={styles.drillCategory}>{d.category}</Text> : null}
+                      </View>
+                      <Pressable
+                        onPress={() => handleToggleSelection(player.id, d.id, selected)}
+                        disabled={pendingSelectionId === d.id}
+                        hitSlop={8}
+                      >
+                        {pendingSelectionId === d.id ? (
+                          <ActivityIndicator color={colors.primary} size="small" />
+                        ) : (
+                          <Text style={selected ? styles.checkDone : styles.checkPending}>
+                            {selected ? '✓ Added' : '+ Add'}
+                          </Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </>
+            ) : null}
+
             <Text style={styles.sectionTitle}>What to work on today</Text>
             <View style={styles.chipRow}>
-              <Pressable
-                style={[styles.chip, !suggestion && styles.chipSelected]}
-                onPress={() => clearSuggestion(player.id)}
-              >
-                <Text style={[styles.chipText, !suggestion && styles.chipTextSelected]}>All</Text>
-              </Pressable>
               {categories.map((cat) => (
                 <Pressable
                   key={cat}
-                  style={[styles.chip, suggestion?.label === cat && styles.chipSelected]}
-                  onPress={() => handlePickCategory(player.id, cat)}
-                  disabled={loadingSuggestionFor === player.id}
+                  style={[
+                    styles.chip,
+                    categoryPickerFor?.playerId === player.id && categoryPickerFor.category === cat && styles.chipSelected,
+                  ]}
+                  onPress={() => setCategoryPickerFor({ playerId: player.id, category: cat })}
                 >
-                  <Text style={[styles.chipText, suggestion?.label === cat && styles.chipTextSelected]}>{cat}</Text>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      categoryPickerFor?.playerId === player.id && categoryPickerFor.category === cat && styles.chipTextSelected,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
                 </Pressable>
               ))}
               {workoutTemplates.map((t) => (
                 <Pressable
                   key={t.id}
-                  style={[styles.chip, styles.chipWorkout, suggestion?.label === t.name && styles.chipSelected]}
+                  style={[styles.chip, styles.chipWorkout]}
                   onPress={() => handlePickWorkout(player.id, t)}
                   onLongPress={() => handleLongPressWorkout(player.id, t)}
+                  disabled={pendingSelectionId === t.id}
                 >
-                  <Text style={[styles.chipText, suggestion?.label === t.name && styles.chipTextSelected]}>
-                    🏀 {t.name}
-                  </Text>
+                  <Text style={styles.chipText}>{pendingSelectionId === t.id ? '…' : `🏀 ${t.name}`}</Text>
                 </Pressable>
               ))}
             </View>
             {workoutTemplates.length > 0 ? (
-              <Text style={styles.buildWorkoutHint}>Long-press a workout above to delete it.</Text>
+              <Text style={styles.buildWorkoutHint}>
+                Tap a workout to add its drills to your list below. Long-press to delete it.
+              </Text>
             ) : null}
             <Pressable onPress={() => setBuilderForPlayerId(player.id)} hitSlop={8}>
               <Text style={styles.buildWorkoutLink}>+ Build a custom workout</Text>
             </Pressable>
 
-            {loadingSuggestionFor === player.id ? (
-              <ActivityIndicator color={colors.primary} style={{ marginVertical: 8 }} />
-            ) : suggestion ? (
-              <>
-                <Text style={styles.sectionTitle}>Suggested: {suggestion.label}</Text>
-                {suggestion.drills.length === 0 ? (
-                  <Text style={styles.placeholder}>No drills in this category yet.</Text>
-                ) : (
-                  suggestion.drills.map((d) => renderDrillRow(player.id, asWeeklyDrill(d), promptForResults, completedToday))
-                )}
-              </>
+            <Text style={styles.sectionTitle}>Your drills</Text>
+            {drills.length === 0 ? (
+              <Text style={styles.placeholder}>
+                No drills yet — tap + Add on a Quick Start drill above, or pick a category to browse and add more.
+              </Text>
             ) : (
-              <>
-                <Text style={styles.sectionTitle}>
-                  {source === 'team' ? "This week's assigned drills" : 'Drill library'}
-                </Text>
-                {drills.length === 0 ? (
-                  <Text style={styles.placeholder}>No drills available yet.</Text>
-                ) : (
-                  drills.map((drill) => renderDrillRow(player.id, drill, promptForResults, completedToday))
-                )}
-              </>
+              drills.map((drill) => renderDrillRow(player.id, drill, promptForResults, completedToday))
             )}
           </View>
             );
           }
         )
       )}
+
+      <Modal
+        visible={categoryPickerFor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryPickerFor(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{categoryPickerFor?.category}</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {(() => {
+                const card = cards.find((c) => c.player.id === categoryPickerFor?.playerId);
+                if (!card || !categoryPickerFor) return null;
+                const categoryDrills = card.allDrills.filter((d) => d.category === categoryPickerFor.category);
+                const selectedIds = new Set(card.drills.filter((d) => !d.assigned).map((d) => d.id));
+                if (categoryDrills.length === 0) {
+                  return <Text style={styles.placeholder}>No drills in this category yet.</Text>;
+                }
+                return categoryDrills.map((d) => {
+                  const selected = selectedIds.has(d.id);
+                  return (
+                    <Pressable
+                      key={d.id}
+                      style={styles.pickerDrillRow}
+                      onPress={() => handleToggleSelection(card.player.id, d.id, selected)}
+                      disabled={pendingSelectionId === d.id}
+                    >
+                      <Text style={[styles.drillName, { flex: 1 }]}>{d.name}</Text>
+                      {pendingSelectionId === d.id ? (
+                        <ActivityIndicator color={colors.primary} size="small" />
+                      ) : (
+                        <Text style={selected ? styles.checkDone : styles.checkPending}>
+                          {selected ? '✓ Added' : '+ Add'}
+                        </Text>
+                      )}
+                    </Pressable>
+                  );
+                });
+              })()}
+            </ScrollView>
+            <Pressable
+              style={[styles.smallButton, styles.standaloneButton]}
+              onPress={() => setCategoryPickerFor(null)}
+            >
+              <Text style={styles.smallButtonText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={schedulingFor != null}
@@ -1338,6 +1444,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   drillRowText: { flex: 1, marginRight: 12 },
+  pickerDrillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
   drillName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   checkPending: { color: colors.primary, fontSize: 13, fontWeight: '600' },
