@@ -200,7 +200,24 @@ create table drills (
   -- for the drill. Optional, settable at custom-drill creation/rename;
   -- the 10 seeded defaults start null (never fabricate a YouTube URL —
   -- Jay adds real ones directly via SQL once he has them).
-  video_url text
+  video_url text,
+  -- Added 2026-09-09, Jay's ask: pre-fills the result screen's attempts
+  -- field for a drill with a known count (e.g. "5 spots x 10" -> 50), so a
+  -- player only has to type makes. Real, structured data set at seed/
+  -- creation time, deliberately not parsed from the drill name at runtime
+  -- (fragile — breaks the moment a drill is renamed). Still editable at
+  -- log time, same trust model as every other logged number here. Also
+  -- the field a future AI make-counter reads, instead of re-parsing text.
+  default_attempts integer,
+  -- Added 2026-09-09, Jay's ask: a real growth metric for conditioning
+  -- ("13-second sprints down to 10-second sprints") distinct from a rep
+  -- count. Per-drill, not a blanket category rule — this app's
+  -- conditioning category genuinely mixes rep-based drills (Suicides x 5)
+  -- and time-based ones (Jump rope, 10 min), and forcing one metric on
+  -- both would be wrong for half of them. When true, the result screen
+  -- shows a time field (completions.duration_seconds) instead of
+  -- makes/attempts.
+  tracks_time boolean not null default false
 );
 
 -- ---------------------------------------------------------------------------
@@ -245,7 +262,13 @@ create table completions (
   -- Both null by default; logging a result is optional, same trust model
   -- as completions themselves (100% self-reported, no verification).
   makes integer,
-  attempts integer
+  attempts integer,
+  -- Added 2026-09-09, paired with drills.tracks_time — real conditioning
+  -- growth metric (a sprint time getting faster over a season), a
+  -- genuinely different measure from a rep count, not attempts repurposed
+  -- to sometimes mean seconds (which would have silently corrupted every
+  -- rep count already logged against existing conditioning drills).
+  duration_seconds integer
 );
 
 -- ---------------------------------------------------------------------------
