@@ -862,7 +862,7 @@ export default function HomeScreen() {
                     }
                   }}
                 >
-                  <Text style={styles.chipText}>🎲 {cat}</Text>
+                  <Text style={styles.chipText}>{cat}</Text>
                 </Pressable>
               ))}
             </View>
