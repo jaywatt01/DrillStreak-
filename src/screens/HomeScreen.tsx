@@ -70,7 +70,7 @@ import {
   listAllDrills,
   listDrillCategories,
   listWorkoutTemplates,
-  pickQuickStartDrills,
+  pickRandomDrillFromCategory,
   WorkoutTemplate,
 } from '../lib/workouts';
 import { deselectDrillForPlayer, selectDrillForPlayer } from '../lib/drillSelections';
@@ -837,42 +837,35 @@ export default function HomeScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {cards.length > 0 ? (() => {
-        const quickStartDrills = pickQuickStartDrills(cards[0]?.allDrills ?? []);
-        if (quickStartDrills.length === 0) return null;
+        const categories = cards[0]?.categories ?? [];
+        if (categories.length === 0) return null;
         return (
           <View style={styles.challengesSection}>
             <Text style={styles.sectionTitle}>Quick Start</Text>
-            {quickStartDrills.map((d) => {
-              const addedForSome = cards.some((c) => c.drills.some((cd) => !cd.assigned && cd.id === d.id));
-              return (
+            <Text style={styles.buildWorkoutHint}>Tap a category for a random drill to assign.</Text>
+            <View style={styles.chipRow}>
+              {categories.map((cat) => (
                 <Pressable
-                  key={d.id}
-                  style={[styles.drillRow, { paddingLeft: 14, paddingVertical: 12 }]}
+                  key={cat}
+                  style={styles.chip}
                   onPress={() => {
-                    // Only one player on the account — no real choice to
-                    // make, so skip the picker and just toggle directly.
+                    const picked = pickRandomDrillFromCategory(cards[0]?.allDrills ?? [], cat);
+                    if (!picked) return;
+                    // Single-player account — no real choice of who it's
+                    // for, so assign it directly and just confirm what
+                    // happened (there's no picker modal to show it in).
                     if (cards.length === 1) {
-                      handleToggleSelection(cards[0].player.id, d.id, addedForSome);
+                      handleToggleSelection(cards[0].player.id, picked.id, false);
+                      Alert.alert('Added', `"${picked.name}" added to ${cards[0].player.display_name}'s drills.`);
                     } else {
-                      setQuickStartPickerFor(d);
+                      setQuickStartPickerFor(picked);
                     }
                   }}
-                  disabled={pendingSelectionId === d.id}
                 >
-                  <View style={styles.drillRowText}>
-                    <Text style={styles.drillName}>{d.name}</Text>
-                    {d.category ? <Text style={styles.drillCategory}>{d.category}</Text> : null}
-                  </View>
-                  {pendingSelectionId === d.id ? (
-                    <ActivityIndicator color={colors.primary} size="small" />
-                  ) : (
-                    <Text style={addedForSome ? styles.checkDone : styles.checkPending}>
-                      {addedForSome ? '✓ Added' : '+ Add'}
-                    </Text>
-                  )}
+                  <Text style={styles.chipText}>🎲 {cat}</Text>
                 </Pressable>
-              );
-            })}
+              ))}
+            </View>
           </View>
         );
       })() : null}
