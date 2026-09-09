@@ -104,6 +104,11 @@ function daysLeft(endsAt: string | null): number {
 // if no result was logged for this completion at all.
 function formatResult(result: DrillResult | undefined): string | null {
   if (!result) return null;
+  if (result.durationSeconds != null) {
+    const minutes = Math.floor(result.durationSeconds / 60);
+    const seconds = result.durationSeconds % 60;
+    return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+  }
   if (result.makes != null && result.attempts != null) return `${result.makes}/${result.attempts}`;
   if (result.attempts != null) return `${result.attempts} reps`;
   return null;
@@ -154,6 +159,7 @@ export default function HomeScreen() {
   const [loggingResultFor, setLoggingResultFor] = useState<{ playerId: string; drill: WeeklyDrill } | null>(null);
   const [resultMakes, setResultMakes] = useState('');
   const [resultAttempts, setResultAttempts] = useState('');
+  const [resultDuration, setResultDuration] = useState('');
   const [savingResult, setSavingResult] = useState(false);
   const [challengingFor, setChallengingFor] = useState<string | null>(null);
   const [teammates, setTeammates] = useState<Teammate[]>([]);
@@ -541,9 +547,33 @@ export default function HomeScreen() {
     );
   };
 
-  const openResultLogger = (playerId: string, drill: WeeklyDrill, existing: DrillResult | undefined) => {
+  const openResultLogger = (
+    playerId: string,
+    drill: WeeklyDrill,
+    existing: DrillResult | undefined,
+    capturedDuration?: number | null
+  ) => {
     setResultMakes(existing?.makes != null ? String(existing.makes) : '');
-    setResultAttempts(existing?.attempts != null ? String(existing.attempts) : '');
+    // Pre-fills from the drill's known count (e.g. "5 spots x 10" -> 50)
+    // when there's no already-logged result to prefer instead — still
+    // fully editable, not locked, same as every other logged number here.
+    setResultAttempts(
+      existing?.attempts != null
+        ? String(existing.attempts)
+        : drill.defaultAttempts != null
+        ? String(drill.defaultAttempts)
+        : ''
+    );
+    // Prefers a just-recorded duration (RecordClipModal's stopwatch) over
+    // any already-logged one — a fresh recording is a new measurement, not
+    // an edit of a prior number. Still fully editable either way.
+    setResultDuration(
+      capturedDuration != null
+        ? String(capturedDuration)
+        : existing?.durationSeconds != null
+        ? String(existing.durationSeconds)
+        : ''
+    );
     setLoggingResultFor({ playerId, drill });
   };
 
@@ -551,9 +581,11 @@ export default function HomeScreen() {
   // — see RecordClipModal), ensure the drill is marked done — logCompletion
   // is an upsert with ignoreDuplicates, so calling it on an already-done
   // drill is a safe no-op — then open the same result modal used
-  // everywhere else, blank rather than prefilled, since this is a fresh
-  // count from footage just watched, not an edit of a prior number.
-  const handleRecordSaved = async () => {
+  // everywhere else. Makes/attempts stay blank (a fresh count from footage
+  // just watched, not an edit of a prior number) but a tracks_time drill's
+  // captured stopwatch duration pre-fills, since that IS the measurement,
+  // not something to re-type.
+  const handleRecordSaved = async (capturedDuration: number | null) => {
     if (!recordingFor) return;
     const { playerId, drill } = recordingFor;
     setRecordingFor(null);
@@ -564,21 +596,27 @@ export default function HomeScreen() {
       Alert.alert('Could not mark drill done', e instanceof Error ? e.message : 'Something went wrong.');
       return;
     }
-    openResultLogger(playerId, drill, undefined);
+    openResultLogger(playerId, drill, undefined, capturedDuration);
   };
 
   const handleSaveResult = async () => {
     if (!loggingResultFor) return;
-    const makes = resultMakes.trim() ? parseInt(resultMakes, 10) : null;
-    const attempts = resultAttempts.trim() ? parseInt(resultAttempts, 10) : null;
     const invalid = (raw: string, parsed: number | null) => raw.trim() && (!Number.isFinite(parsed) || (parsed as number) < 0);
-    if (invalid(resultMakes, makes) || invalid(resultAttempts, attempts)) {
-      Alert.alert('Invalid number', 'Makes and attempts must be zero or a positive number.');
+    const tracksTime = loggingResultFor.drill.tracksTime;
+    const makes = tracksTime || !resultMakes.trim() ? null : parseInt(resultMakes, 10);
+    const attempts = tracksTime || !resultAttempts.trim() ? null : parseInt(resultAttempts, 10);
+    const duration = tracksTime && resultDuration.trim() ? parseInt(resultDuration, 10) : null;
+    if (
+      invalid(resultMakes, makes) ||
+      invalid(resultAttempts, attempts) ||
+      invalid(resultDuration, duration)
+    ) {
+      Alert.alert('Invalid number', 'Enter zero or a positive number.');
       return;
     }
     setSavingResult(true);
     try {
-      await logDrillResult(loggingResultFor.playerId, loggingResultFor.drill.id, makes, attempts);
+      await logDrillResult(loggingResultFor.playerId, loggingResultFor.drill.id, makes, attempts, duration);
       setLoggingResultFor(null);
       await load();
     } catch (e) {
@@ -1287,29 +1325,50 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{loggingResultFor?.drill.name}</Text>
-            <Text style={styles.modalHint}>
-              Optional — log a result if it applies (makes/attempts for
-              shooting, or just attempts for a rep count). Leave blank to
-              skip.
-            </Text>
-            <Text style={styles.modalLabel}>Makes</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="number-pad"
-              placeholder="Optional"
-              placeholderTextColor={colors.textMuted}
-              value={resultMakes}
-              onChangeText={setResultMakes}
-            />
-            <Text style={styles.modalLabel}>Attempts / Reps</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="number-pad"
-              placeholder="Optional"
-              placeholderTextColor={colors.textMuted}
-              value={resultAttempts}
-              onChangeText={setResultAttempts}
-            />
+            {loggingResultFor?.drill.tracksTime ? (
+              <>
+                <Text style={styles.modalHint}>
+                  Optional — log how long it took. Editable, so it's fine if
+                  there's a few seconds' lag getting to the phone to stop
+                  timing after a solo drill. Leave blank to skip.
+                </Text>
+                <Text style={styles.modalLabel}>Time (seconds)</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textMuted}
+                  value={resultDuration}
+                  onChangeText={setResultDuration}
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalHint}>
+                  Optional — log a result if it applies (makes/attempts for
+                  shooting, or just attempts for a rep count). Leave blank to
+                  skip.
+                </Text>
+                <Text style={styles.modalLabel}>Makes</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textMuted}
+                  value={resultMakes}
+                  onChangeText={setResultMakes}
+                />
+                <Text style={styles.modalLabel}>Attempts / Reps</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textMuted}
+                  value={resultAttempts}
+                  onChangeText={setResultAttempts}
+                />
+              </>
+            )}
             <View style={styles.modalButtonRow}>
               <Pressable
                 style={[styles.smallButton, styles.smallButtonSecondary]}
@@ -1381,6 +1440,7 @@ export default function HomeScreen() {
     <RecordClipModal
       visible={recordingFor != null}
       drillName={recordingFor?.drill.name ?? null}
+      tracksTime={recordingFor?.drill.tracksTime ?? false}
       onClose={() => setRecordingFor(null)}
       onSaved={handleRecordSaved}
     />

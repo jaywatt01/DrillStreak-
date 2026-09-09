@@ -134,11 +134,20 @@ export type Drill = {
   category: string | null;
   estimatedMinutes: number | null;
   videoUrl: string | null;
+  // Pre-fills the result screen's attempts field with a known count (e.g.
+  // "5 spots x 10" -> 50) so a player only has to type makes — still
+  // editable, never locked. Null for drills with no clean derivable count.
+  defaultAttempts: number | null;
+  // When true, the result screen logs a time (completions.duration_seconds)
+  // instead of makes/attempts — a real growth metric for conditioning
+  // drills genuinely measured by speed, not a rep count.
+  tracksTime: boolean;
 };
 
 export type CustomDrill = Drill & { is_default: boolean };
 
-export const DRILL_SELECT_COLUMNS = 'id, name, category, estimated_minutes, video_url';
+export const DRILL_SELECT_COLUMNS =
+  'id, name, category, estimated_minutes, video_url, default_attempts, tracks_time';
 
 // Maps a raw `drills` row (snake_case, as returned by supabase-js) to the
 // camelCase Drill shape used throughout the app.
@@ -148,6 +157,8 @@ export function mapDrillRow(row: {
   category: string | null;
   estimated_minutes: number | null;
   video_url: string | null;
+  default_attempts: number | null;
+  tracks_time: boolean;
 }): Drill {
   return {
     id: row.id,
@@ -155,6 +166,8 @@ export function mapDrillRow(row: {
     category: row.category,
     estimatedMinutes: row.estimated_minutes,
     videoUrl: row.video_url,
+    defaultAttempts: row.default_attempts,
+    tracksTime: row.tracks_time,
   };
 }
 
@@ -596,38 +609,46 @@ export async function logCompletion(playerId: string, drillId: string): Promise<
   if (error) throw error;
 }
 
-export type DrillResult = { makes: number | null; attempts: number | null };
+export type DrillResult = { makes: number | null; attempts: number | null; durationSeconds: number | null };
 
 // Keyed by drill_id, so callers can both check "is this drill done today"
 // (Map.has, same as the old Set) and read any result already logged for it.
 export async function getTodayCompletions(playerId: string): Promise<Map<string, DrillResult>> {
   const { data, error } = await supabase
     .from('completions')
-    .select('drill_id, makes, attempts')
+    .select('drill_id, makes, attempts, duration_seconds')
     .eq('player_id', playerId)
     .eq('date', todayDateString());
   if (error) throw error;
   return new Map(
     (data ?? []).map((c) => [
       c.drill_id as string,
-      { makes: c.makes as number | null, attempts: c.attempts as number | null },
+      {
+        makes: c.makes as number | null,
+        attempts: c.attempts as number | null,
+        durationSeconds: c.duration_seconds as number | null,
+      },
     ])
   );
 }
 
 // Attaches an optional numeric result to today's already-logged completion
-// for this drill (makes/attempts for shooting, or just `attempts` alone as
-// a generic rep count for anything else). The completions row must already
-// exist — call after logCompletion, not instead of it.
+// for this drill — makes/attempts for shooting, `attempts` alone as a
+// generic rep count for anything else, or `durationSeconds` for a
+// tracks_time drill (mutually exclusive with makes/attempts in practice,
+// but not enforced at the DB level — the UI only ever sends one shape per
+// drill's tracksTime flag). The completions row must already exist — call
+// after logCompletion, not instead of it.
 export async function logDrillResult(
   playerId: string,
   drillId: string,
   makes: number | null,
-  attempts: number | null
+  attempts: number | null,
+  durationSeconds: number | null
 ): Promise<void> {
   const { error } = await supabase
     .from('completions')
-    .update({ makes, attempts })
+    .update({ makes, attempts, duration_seconds: durationSeconds })
     .eq('player_id', playerId)
     .eq('drill_id', drillId)
     .eq('date', todayDateString());
