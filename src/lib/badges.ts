@@ -39,13 +39,22 @@ export const BADGE_LABELS: Record<BadgeType, string> = {
 // milestones read as a visible progression, not four random icons. The
 // two "event" badges (challenge_won, offseason_completed) get icons that
 // don't visually collide with the streak series or each other.
+//
+// offseason_completed was 🏀 until 2026-09-10 — a real bug, not caught
+// until baseball/softball shipped: the badge system itself needed zero
+// changes for a new sport (streak/challenge/offseason mechanics never
+// reference category or sport at all), but this one icon silently
+// assumed basketball. Fixed to a sport-neutral icon rather than threading
+// `sport` through the 4 render call sites (BadgeIconStrip, BadgeLegend,
+// HomeScreen's share text, ProgressScreen) for a single emoji swap —
+// disproportionate plumbing for what this actually needed.
 export const BADGE_ICONS: Record<BadgeType, string> = {
   streak_7: '🔥',
   streak_30: '⚡',
   streak_60: '🌟',
   streak_100: '👑',
   challenge_won: '🏆',
-  offseason_completed: '🏀',
+  offseason_completed: '🎯',
 };
 
 export const BADGE_HOW_TO_EARN: Record<BadgeType, string> = {

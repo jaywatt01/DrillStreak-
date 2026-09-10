@@ -161,12 +161,16 @@ export type Drill = {
   // instead of makes/attempts — a real growth metric for conditioning
   // drills genuinely measured by speed, not a rep count.
   tracksTime: boolean;
+  // Optional secondary filter within category (e.g. Infield/Outfield/
+  // Catcher within Fielding) — null for the large majority of drills that
+  // don't need one. See schema.sql's comment on drills.position_group.
+  positionGroup: string | null;
 };
 
 export type CustomDrill = Drill & { is_default: boolean };
 
 export const DRILL_SELECT_COLUMNS =
-  'id, name, category, estimated_minutes, video_url, default_attempts, tracks_time';
+  'id, name, category, estimated_minutes, video_url, default_attempts, tracks_time, position_group';
 
 // Maps a raw `drills` row (snake_case, as returned by supabase-js) to the
 // camelCase Drill shape used throughout the app.
@@ -178,6 +182,7 @@ export function mapDrillRow(row: {
   video_url: string | null;
   default_attempts: number | null;
   tracks_time: boolean;
+  position_group: string | null;
 }): Drill {
   return {
     id: row.id,
@@ -187,6 +192,7 @@ export function mapDrillRow(row: {
     videoUrl: row.video_url,
     defaultAttempts: row.default_attempts,
     tracksTime: row.tracks_time,
+    positionGroup: row.position_group,
   };
 }
 

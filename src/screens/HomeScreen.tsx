@@ -227,6 +227,11 @@ export default function HomeScreen() {
   // the picker itself reads straight from that player's already-loaded
   // allDrills, filtered by category — no extra query needed.
   const [categoryPickerFor, setCategoryPickerFor] = useState<{ playerId: string; category: string } | null>(null);
+  // Secondary filter within categoryPickerFor's category (e.g. a catcher
+  // shouldn't scroll every fielding drill to find their 2) — 2026-09-10,
+  // same feature/reasoning as MyTeamScreen's drillPositionFilter. Reset
+  // whenever a new category picker opens.
+  const [categoryPositionFilter, setCategoryPositionFilter] = useState<string | null>(null);
   // Which Quick Start drill's player-picker is open — 2026-09-09
   // correction, Jay's real reasoning: a household with kids at different
   // ages/skill levels shouldn't get the same suggestion auto-applied to
@@ -1157,7 +1162,10 @@ export default function HomeScreen() {
                     styles.chip,
                     categoryPickerFor?.playerId === player.id && categoryPickerFor.category === cat && styles.chipSelected,
                   ]}
-                  onPress={() => setCategoryPickerFor({ playerId: player.id, category: cat })}
+                  onPress={() => {
+                    setCategoryPickerFor({ playerId: player.id, category: cat });
+                    setCategoryPositionFilter(null);
+                  }}
                 >
                   <Text
                     style={[
@@ -1255,11 +1263,39 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{categoryPickerFor?.category}</Text>
+            {(() => {
+              const card = cards.find((c) => c.player.id === categoryPickerFor?.playerId);
+              if (!card || !categoryPickerFor) return null;
+              const allInCategory = card.allDrills.filter((d) => d.category === categoryPickerFor.category);
+              const positionGroups = Array.from(
+                new Set(allInCategory.map((d) => d.positionGroup).filter((p): p is string => !!p))
+              ).sort();
+              if (positionGroups.length === 0) return null;
+              return (
+                <View style={[styles.chipRow, { marginBottom: 10 }]}>
+                  {positionGroups.map((pos) => (
+                    <Pressable
+                      key={pos}
+                      style={[styles.chip, categoryPositionFilter === pos && styles.chipSelected]}
+                      onPress={() => setCategoryPositionFilter(categoryPositionFilter === pos ? null : pos)}
+                    >
+                      <Text style={[styles.chipText, categoryPositionFilter === pos && styles.chipTextSelected]}>
+                        {pos}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })()}
             <ScrollView style={{ maxHeight: 400 }}>
               {(() => {
                 const card = cards.find((c) => c.player.id === categoryPickerFor?.playerId);
                 if (!card || !categoryPickerFor) return null;
-                const categoryDrills = card.allDrills.filter((d) => d.category === categoryPickerFor.category);
+                const categoryDrills = card.allDrills.filter(
+                  (d) =>
+                    d.category === categoryPickerFor.category &&
+                    (categoryPositionFilter == null || d.positionGroup === categoryPositionFilter)
+                );
                 const selectedIds = new Set(card.drills.filter((d) => !d.assigned).map((d) => d.id));
                 if (categoryDrills.length === 0) {
                   return <Text style={styles.placeholder}>No drills in this category yet.</Text>;

@@ -242,7 +242,16 @@ create table drills (
   -- of mixing every sport's drills together once a second one has real
   -- content. A custom drill inherits the sport of the player it's created
   -- for at creation time (see createCustomDrill in lib/players.ts).
-  sport text not null default 'basketball'
+  sport text not null default 'basketball',
+  -- Added 2026-09-10, Jay's real ask: a coach with a mixed infield/
+  -- outfield roster (or a single catcher) shouldn't have to scroll every
+  -- fielding drill to find the ones for their position. Nullable, generic
+  -- secondary filter within a category — not hardcoded to fielding or to
+  -- baseball/softball, just the only place it's populated today. Sourced
+  -- dynamically by the UI the same way category itself already is (see
+  -- listDrillCategories in lib/workouts.ts), so it only ever shows up
+  -- where real data exists for it.
+  position_group text
 );
 
 -- ---------------------------------------------------------------------------

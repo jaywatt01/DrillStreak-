@@ -144,6 +144,15 @@ export default function MyTeamScreen() {
   // picker opens so a stale filter from a previous assign doesn't carry
   // over.
   const [drillCategoryFilter, setDrillCategoryFilter] = useState<string | null>(null);
+  // Secondary filter within a category (e.g. Infield/Outfield/Catcher
+  // within Fielding) — 2026-09-10, Jay's ask: a coach with a mixed
+  // roster shouldn't scroll every fielding drill to find the 2-4 that
+  // apply to one position. Only rendered when the selected category
+  // actually has position groups (sourced dynamically, same as
+  // drillCategoryFilter's own category list) — stays invisible for every
+  // category/sport that doesn't use it. Reset whenever the category
+  // changes, same "no stale filter carries over" discipline as above.
+  const [drillPositionFilter, setDrillPositionFilter] = useState<string | null>(null);
   const [pickingTargetFor, setPickingTargetFor] = useState<Drill | null>(null);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
@@ -776,6 +785,7 @@ export default function MyTeamScreen() {
               <Pressable
                 onPress={() => {
                   setDrillCategoryFilter(null);
+                  setDrillPositionFilter(null);
                   setBrowsingDrills(true);
                 }}
               >
@@ -1108,10 +1118,39 @@ export default function MyTeamScreen() {
                     <Pressable
                       key={cat}
                       style={[styles.chip, drillCategoryFilter === cat && styles.chipSelected]}
-                      onPress={() => setDrillCategoryFilter(cat)}
+                      onPress={() => {
+                        setDrillCategoryFilter(cat);
+                        setDrillPositionFilter(null);
+                      }}
                     >
                       <Text style={[styles.chipText, drillCategoryFilter === cat && styles.chipTextSelected]}>
                         {cat}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })()}
+            {drillCategoryFilter != null && (() => {
+              const positionGroups = Array.from(
+                new Set(
+                  availableDrills
+                    .filter((d) => d.category === drillCategoryFilter)
+                    .map((d) => d.positionGroup)
+                    .filter((p): p is string => !!p)
+                )
+              ).sort();
+              if (positionGroups.length === 0) return null;
+              return (
+                <View style={styles.chipRow}>
+                  {positionGroups.map((pos) => (
+                    <Pressable
+                      key={pos}
+                      style={[styles.chip, drillPositionFilter === pos && styles.chipSelected]}
+                      onPress={() => setDrillPositionFilter(drillPositionFilter === pos ? null : pos)}
+                    >
+                      <Text style={[styles.chipText, drillPositionFilter === pos && styles.chipTextSelected]}>
+                        {pos}
                       </Text>
                     </Pressable>
                   ))}
@@ -1123,7 +1162,11 @@ export default function MyTeamScreen() {
             ) : (
               <ScrollView style={styles.popupScroll}>
                 {availableDrills
-                  .filter((drill) => drill.category === drillCategoryFilter)
+                  .filter(
+                    (drill) =>
+                      drill.category === drillCategoryFilter &&
+                      (drillPositionFilter == null || drill.positionGroup === drillPositionFilter)
+                  )
                   .map((drill) => (
                     <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
                       <View style={styles.drillRowMain}>
