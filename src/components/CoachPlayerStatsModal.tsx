@@ -40,6 +40,8 @@ const CALENDAR_WEEKS_FREE = 1;
 type Props = {
   playerId: string;
   playerName: string;
+  // Drives the offseason badge's sport-specific icon (2026-09-10).
+  playerSport: string;
   onClose: () => void;
   // Only pass this when opening the modal for the account's OWN player
   // (the "tap your name on Home" path, added 2026-08-25) — it gates
@@ -63,7 +65,7 @@ type Props = {
 // completions_teammate_read RLS governs how much comes back for those two
 // paths; the optional hasParentTier prop above only matters for the third,
 // newer self-view path (see its comment).
-export default function CoachPlayerStatsModal({ playerId, playerName, onClose, hasParentTier }: Props) {
+export default function CoachPlayerStatsModal({ playerId, playerName, playerSport, onClose, hasParentTier }: Props) {
   const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +219,7 @@ export default function CoachPlayerStatsModal({ playerId, playerName, onClose, h
               {badges.length > 0 ? (
                 <View style={styles.badgesSection}>
                   <Text style={styles.repTalliesLabel}>Badges</Text>
-                  <BadgeLegend currentSeasonBadges={currentSeasonBadges} allBadges={badges} />
+                  <BadgeLegend currentSeasonBadges={currentSeasonBadges} allBadges={badges} sport={playerSport} />
                 </View>
               ) : null}
 

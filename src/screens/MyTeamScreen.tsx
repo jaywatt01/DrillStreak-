@@ -20,7 +20,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { colors } from '../theme/colors';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import WeekDotsRow from '../components/WeekDotsRow';
-import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
+import { AVAILABLE_SPORTS, DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
 import {
   assignDrillToPlayer,
   assignDrillToTeam,
@@ -89,6 +89,7 @@ export default function MyTeamScreen() {
   const [assignedDrills, setAssignedDrills] = useState<AssignedDrill[]>([]);
   const [rosterCompletions, setRosterCompletions] = useState<RosterCompletion[]>([]);
   const [teamName, setTeamName] = useState('');
+  const [newTeamSport, setNewTeamSport] = useState<string>('basketball');
   const [creating, setCreating] = useState(false);
   const [togglingDrillId, setTogglingDrillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +144,15 @@ export default function MyTeamScreen() {
   // picker opens so a stale filter from a previous assign doesn't carry
   // over.
   const [drillCategoryFilter, setDrillCategoryFilter] = useState<string | null>(null);
+  // Secondary filter within a category (e.g. Infield/Outfield/Catcher
+  // within Fielding) — 2026-09-10, Jay's ask: a coach with a mixed
+  // roster shouldn't scroll every fielding drill to find the 2-4 that
+  // apply to one position. Only rendered when the selected category
+  // actually has position groups (sourced dynamically, same as
+  // drillCategoryFilter's own category list) — stays invisible for every
+  // category/sport that doesn't use it. Reset whenever the category
+  // changes, same "no stale filter carries over" discipline as above.
+  const [drillPositionFilter, setDrillPositionFilter] = useState<string | null>(null);
   const [pickingTargetFor, setPickingTargetFor] = useState<Drill | null>(null);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
@@ -155,7 +165,7 @@ export default function MyTeamScreen() {
       if (myTeam) {
         const [rosterData, drills, assigned] = await Promise.all([
           getRoster(myTeam.id),
-          getAvailableDrills(),
+          getAvailableDrills(myTeam.sport),
           getWeeklyTeamAssignments(myTeam.id),
         ]);
         setRoster(rosterData);
@@ -238,8 +248,9 @@ export default function MyTeamScreen() {
     setCreating(true);
     setError(null);
     try {
-      await createTeam(teamName.trim());
+      await createTeam(teamName.trim(), newTeamSport);
       setTeamName('');
+      setNewTeamSport('basketball');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create team.');
@@ -603,6 +614,24 @@ export default function MyTeamScreen() {
             value={teamName}
             onChangeText={setTeamName}
           />
+          <View style={styles.chipRow}>
+            {AVAILABLE_SPORTS.map((sport) => (
+              <Pressable
+                key={sport.value}
+                style={[
+                  styles.chip,
+                  newTeamSport === sport.value && styles.chipSelected,
+                  sport.comingSoon && styles.chipDisabled,
+                ]}
+                onPress={() => !sport.comingSoon && setNewTeamSport(sport.value)}
+                disabled={sport.comingSoon}
+              >
+                <Text style={[styles.chipText, newTeamSport === sport.value && styles.chipTextSelected]}>
+                  {sport.label}{sport.comingSoon ? ' (Soon)' : ''}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <Pressable
             style={[styles.button, (!teamName.trim() || creating) && styles.buttonDisabled]}
             onPress={handleCreateTeam}
@@ -756,6 +785,7 @@ export default function MyTeamScreen() {
               <Pressable
                 onPress={() => {
                   setDrillCategoryFilter(null);
+                  setDrillPositionFilter(null);
                   setBrowsingDrills(true);
                 }}
               >
@@ -1088,10 +1118,39 @@ export default function MyTeamScreen() {
                     <Pressable
                       key={cat}
                       style={[styles.chip, drillCategoryFilter === cat && styles.chipSelected]}
-                      onPress={() => setDrillCategoryFilter(cat)}
+                      onPress={() => {
+                        setDrillCategoryFilter(cat);
+                        setDrillPositionFilter(null);
+                      }}
                     >
                       <Text style={[styles.chipText, drillCategoryFilter === cat && styles.chipTextSelected]}>
                         {cat}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })()}
+            {drillCategoryFilter != null && (() => {
+              const positionGroups = Array.from(
+                new Set(
+                  availableDrills
+                    .filter((d) => d.category === drillCategoryFilter)
+                    .map((d) => d.positionGroup)
+                    .filter((p): p is string => !!p)
+                )
+              ).sort();
+              if (positionGroups.length === 0) return null;
+              return (
+                <View style={styles.chipRow}>
+                  {positionGroups.map((pos) => (
+                    <Pressable
+                      key={pos}
+                      style={[styles.chip, drillPositionFilter === pos && styles.chipSelected]}
+                      onPress={() => setDrillPositionFilter(drillPositionFilter === pos ? null : pos)}
+                    >
+                      <Text style={[styles.chipText, drillPositionFilter === pos && styles.chipTextSelected]}>
+                        {pos}
                       </Text>
                     </Pressable>
                   ))}
@@ -1103,7 +1162,11 @@ export default function MyTeamScreen() {
             ) : (
               <ScrollView style={styles.popupScroll}>
                 {availableDrills
-                  .filter((drill) => drill.category === drillCategoryFilter)
+                  .filter(
+                    (drill) =>
+                      drill.category === drillCategoryFilter &&
+                      (drillPositionFilter == null || drill.positionGroup === drillPositionFilter)
+                  )
                   .map((drill) => (
                     <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
                       <View style={styles.drillRowMain}>
@@ -1187,6 +1250,7 @@ export default function MyTeamScreen() {
         <CoachPlayerStatsModal
           playerId={statsPlayer.id}
           playerName={statsPlayer.display_name}
+          playerSport={team?.sport ?? 'basketball'}
           onClose={closeStatsPlayer}
         />
       ) : null}
@@ -1335,6 +1399,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipDisabled: { opacity: 0.4 },
   chipText: { fontSize: 13, color: colors.text, fontWeight: '600' },
   chipTextSelected: { color: '#FFFFFF' },
   drillRow: {

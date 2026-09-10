@@ -84,7 +84,12 @@ export default function TeammatesModal({ playerId, onClose }: Props) {
       </View>
 
       {viewing ? (
-        <CoachPlayerStatsModal playerId={viewing.id} playerName={viewing.display_name} onClose={() => setViewing(null)} />
+        <CoachPlayerStatsModal
+          playerId={viewing.id}
+          playerName={viewing.display_name}
+          playerSport={viewing.sport}
+          onClose={() => setViewing(null)}
+        />
       ) : null}
     </Modal>
   );

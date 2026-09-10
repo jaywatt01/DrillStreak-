@@ -14,6 +14,7 @@ export type Teammate = {
   weight: string | null;
   grad_year: number | null;
   stats_visible_to_team: boolean;
+  sport: string;
 };
 
 export type Challenge = {

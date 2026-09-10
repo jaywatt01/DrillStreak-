@@ -8,6 +8,7 @@ export type Team = {
   name: string;
   invite_code: string;
   prompt_for_results: boolean;
+  sport: string;
 };
 
 export type RosterPlayer = {
@@ -50,7 +51,7 @@ export async function getMyTeam(): Promise<Team | null> {
 
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, invite_code, prompt_for_results')
+    .select('id, name, invite_code, prompt_for_results, sport')
     .eq('coach_user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
@@ -59,15 +60,15 @@ export async function getMyTeam(): Promise<Team | null> {
   return data as Team | null;
 }
 
-export async function createTeam(name: string): Promise<Team> {
+export async function createTeam(name: string, sport: string = 'basketball'): Promise<Team> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
 
   const { data, error } = await supabase
     .from('teams')
-    .insert({ name, coach_user_id: userId })
-    .select('id, name, invite_code, prompt_for_results')
+    .insert({ name, coach_user_id: userId, sport })
+    .select('id, name, invite_code, prompt_for_results, sport')
     .single();
   if (error) throw error;
   return data as Team;
@@ -147,14 +148,20 @@ export async function removeFromRoster(membershipId: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function getAvailableDrills(): Promise<Drill[]> {
+// sport filters the shared default library to the team's own sport (a
+// basketball coach shouldn't see baseball's 30 defaults mixed in) — added
+// 2026-09-10 alongside the baseball/softball libraries. A coach's own
+// custom drills (created_by_user_id match) still show regardless of
+// sport, same as before this filter existed; in practice a coach only
+// ever creates drills for their own team's sport anyway.
+export async function getAvailableDrills(sport: string): Promise<Drill[]> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
 
   const { data, error } = await supabase
     .from('drills')
     .select(DRILL_SELECT_COLUMNS)
-    .or(`is_default.eq.true,created_by_user_id.eq.${userId}`)
+    .or(`and(is_default.eq.true,sport.eq.${sport}),created_by_user_id.eq.${userId}`)
     .order('category');
   if (error) throw error;
   return (data ?? []).map(mapDrillRow);

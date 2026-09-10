@@ -64,9 +64,9 @@ import {
   awardChallengeWonBadgeIfNeeded,
   awardStreakBadgesIfNeeded,
   Badge,
-  BADGE_ICONS,
   BADGE_LABELS,
   filterCurrentBadges,
+  getBadgeIcon,
   listBadges,
 } from '../lib/badges';
 import { hasSharedBadgeSince, shareBadgeToTeam } from '../lib/teamMessages';
@@ -188,7 +188,9 @@ export default function HomeScreen() {
   // now with hasParentTier passed so a free-tier account's own full
   // history stays paywalled here too (see the prop's comment in that
   // component for the bypass this closes).
-  const [viewingOwnProfileFor, setViewingOwnProfileFor] = useState<{ id: string; name: string } | null>(null);
+  const [viewingOwnProfileFor, setViewingOwnProfileFor] = useState<{ id: string; name: string; sport: string } | null>(
+    null
+  );
   const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   // Institutional (Team/Program) access is per-player, not account-level —
   // fetched fresh whenever the self-view profile changes, combined with the
@@ -227,6 +229,11 @@ export default function HomeScreen() {
   // the picker itself reads straight from that player's already-loaded
   // allDrills, filtered by category — no extra query needed.
   const [categoryPickerFor, setCategoryPickerFor] = useState<{ playerId: string; category: string } | null>(null);
+  // Secondary filter within categoryPickerFor's category (e.g. a catcher
+  // shouldn't scroll every fielding drill to find their 2) — 2026-09-10,
+  // same feature/reasoning as MyTeamScreen's drillPositionFilter. Reset
+  // whenever a new category picker opens.
+  const [categoryPositionFilter, setCategoryPositionFilter] = useState<string | null>(null);
   // Which Quick Start drill's player-picker is open — 2026-09-09
   // correction, Jay's real reasoning: a household with kids at different
   // ages/skill levels shouldn't get the same suggestion auto-applied to
@@ -338,8 +345,8 @@ export default function HomeScreen() {
             getTodayCompletions(player.id),
             getPromptForResultsForPlayer(player.id),
             getChallengesForPlayer(player.id),
-            listDrillCategories(player.id),
-            listAllDrills(player.id),
+            listDrillCategories(player.id, player.sport),
+            listAllDrills(player.id, player.sport),
             listWorkoutTemplates(player.id),
             getPlayerTeams(player.id),
             getActiveSeason(player.id),
@@ -466,10 +473,11 @@ export default function HomeScreen() {
     playerId: string,
     activeSeason: Season | null,
     teams: { id: string; name: string }[],
-    badge: Badge
+    badge: Badge,
+    sport: string
   ) => {
     const label = BADGE_LABELS[badge.type];
-    const icon = BADGE_ICONS[badge.type];
+    const icon = getBadgeIcon(badge.type, sport);
     // Share-once-per-season lock (Jay-requested, 2026-08-25): checked
     // right before the insert, not just relied on as a UI-only guard — the
     // whole point is stopping the same brag from going out to the team
@@ -974,7 +982,11 @@ export default function HomeScreen() {
             }}
           >
             <View style={styles.playerNameRow}>
-              <Pressable onPress={() => setViewingOwnProfileFor({ id: player.id, name: player.display_name })}>
+              <Pressable
+                onPress={() =>
+                  setViewingOwnProfileFor({ id: player.id, name: player.display_name, sport: player.sport })
+                }
+              >
                 <Text style={styles.playerName}>{player.display_name}</Text>
               </Pressable>
               {/* Scoped per-player now (2026-08-25, real gap Jay caught) —
@@ -1051,9 +1063,9 @@ export default function HomeScreen() {
                       <Pressable
                         key={b.id}
                         style={[styles.chip, styles.chipBadge]}
-                        onLongPress={() => handleShareBadge(player.id, activeSeason, teams, b)}
+                        onLongPress={() => handleShareBadge(player.id, activeSeason, teams, b, player.sport)}
                       >
-                        <Text style={styles.chipText}>{BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}</Text>
+                        <Text style={styles.chipText}>{getBadgeIcon(b.type, player.sport)} {BADGE_LABELS[b.type]}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -1157,7 +1169,10 @@ export default function HomeScreen() {
                     styles.chip,
                     categoryPickerFor?.playerId === player.id && categoryPickerFor.category === cat && styles.chipSelected,
                   ]}
-                  onPress={() => setCategoryPickerFor({ playerId: player.id, category: cat })}
+                  onPress={() => {
+                    setCategoryPickerFor({ playerId: player.id, category: cat });
+                    setCategoryPositionFilter(null);
+                  }}
                 >
                   <Text
                     style={[
@@ -1255,11 +1270,39 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{categoryPickerFor?.category}</Text>
+            {(() => {
+              const card = cards.find((c) => c.player.id === categoryPickerFor?.playerId);
+              if (!card || !categoryPickerFor) return null;
+              const allInCategory = card.allDrills.filter((d) => d.category === categoryPickerFor.category);
+              const positionGroups = Array.from(
+                new Set(allInCategory.map((d) => d.positionGroup).filter((p): p is string => !!p))
+              ).sort();
+              if (positionGroups.length === 0) return null;
+              return (
+                <View style={[styles.chipRow, { marginBottom: 10 }]}>
+                  {positionGroups.map((pos) => (
+                    <Pressable
+                      key={pos}
+                      style={[styles.chip, categoryPositionFilter === pos && styles.chipSelected]}
+                      onPress={() => setCategoryPositionFilter(categoryPositionFilter === pos ? null : pos)}
+                    >
+                      <Text style={[styles.chipText, categoryPositionFilter === pos && styles.chipTextSelected]}>
+                        {pos}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })()}
             <ScrollView style={{ maxHeight: 400 }}>
               {(() => {
                 const card = cards.find((c) => c.player.id === categoryPickerFor?.playerId);
                 if (!card || !categoryPickerFor) return null;
-                const categoryDrills = card.allDrills.filter((d) => d.category === categoryPickerFor.category);
+                const categoryDrills = card.allDrills.filter(
+                  (d) =>
+                    d.category === categoryPickerFor.category &&
+                    (categoryPositionFilter == null || d.positionGroup === categoryPositionFilter)
+                );
                 const selectedIds = new Set(card.drills.filter((d) => !d.assigned).map((d) => d.id));
                 if (categoryDrills.length === 0) {
                   return <Text style={styles.placeholder}>No drills in this category yet.</Text>;
@@ -1491,6 +1534,7 @@ export default function HomeScreen() {
       <CoachPlayerStatsModal
         playerId={viewingOwnProfileFor.id}
         playerName={viewingOwnProfileFor.name}
+        playerSport={viewingOwnProfileFor.sport}
         hasParentTier={hasParentTier}
         onClose={() => setViewingOwnProfileFor(null)}
       />

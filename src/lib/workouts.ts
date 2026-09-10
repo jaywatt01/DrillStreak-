@@ -7,11 +7,14 @@ import { DRILL_SELECT_COLUMNS, Drill, mapDrillRow } from './players';
 // fixed hardcoded list, so a coach/player adding a custom drill with a new
 // category name automatically gets a chip for it next time. Sorted
 // alphabetically for a stable chip order.
-export async function listDrillCategories(playerId: string): Promise<string[]> {
+// sport scopes the shared default library to this player's own sport
+// (added 2026-09-10 alongside baseball/softball) — a player's own custom
+// drills (player_id match) still show regardless, same as before.
+export async function listDrillCategories(playerId: string, sport: string): Promise<string[]> {
   const { data, error } = await supabase
     .from('drills')
     .select('category')
-    .or(`is_default.eq.true,player_id.eq.${playerId}`);
+    .or(`and(is_default.eq.true,sport.eq.${sport}),player_id.eq.${playerId}`);
   if (error) throw error;
   const categories = new Set(
     (data ?? [])
@@ -27,11 +30,11 @@ export async function listDrillCategories(playerId: string): Promise<string[]> {
 // team assignments. Same filter shape as getWeeklyDrills' library
 // fallback in lib/players.ts, extracted here since the builder needs it
 // unconditionally, not just when there's no team assignment.
-export async function listAllDrills(playerId: string): Promise<Drill[]> {
+export async function listAllDrills(playerId: string, sport: string): Promise<Drill[]> {
   const { data, error } = await supabase
     .from('drills')
     .select(DRILL_SELECT_COLUMNS)
-    .or(`is_default.eq.true,player_id.eq.${playerId}`)
+    .or(`and(is_default.eq.true,sport.eq.${sport}),player_id.eq.${playerId}`)
     .order('category');
   if (error) throw error;
   return (data ?? []).map(mapDrillRow);

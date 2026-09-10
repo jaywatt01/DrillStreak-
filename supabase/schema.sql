@@ -60,7 +60,16 @@ create table players (
   -- Growth strategy section, but this is closer to "more detail within an
   -- existing relationship" than a new comparison surface — a family can
   -- still flip it off per player.
-  stats_visible_to_team boolean not null default true
+  stats_visible_to_team boolean not null default true,
+  -- Added 2026-09-10, first step toward baseball/softball support: which
+  -- sport this player's profile is for. Free text, not an enum, same
+  -- reasoning as position above — a future sport shouldn't need another
+  -- migration to add, just a value. Set once at creation (AddPlayerScreen)
+  -- like is_account_holder; not editable after the fact for now, since
+  -- nothing downstream (default drill library, Quick Start categories)
+  -- reads it for a mid-life sport change yet. Defaults to 'basketball' —
+  -- the only sport with real content today.
+  sport text not null default 'basketball'
 );
 
 -- guardianships: lets a second account (e.g. the other parent) access a
@@ -109,7 +118,11 @@ create table teams (
   -- test only) — always set a real date matching the purchased term for
   -- a genuine paid plan.
   institutional_plan text check (institutional_plan in ('team', 'program')),
-  institutional_plan_expires_at timestamptz
+  institutional_plan_expires_at timestamptz,
+  -- Added 2026-09-10, same as players.sport above: which sport this
+  -- roster is for. Free text, set once at team creation (My Team's
+  -- "create a team" flow), defaults to 'basketball'.
+  sport text not null default 'basketball'
 );
 
 -- Real security gap caught before this shipped, not after: teams_coach_access
@@ -220,7 +233,25 @@ create table drills (
   -- completions.duration_seconds, both optional) instead of makes/
   -- attempts — same "two numbers together" shape shooting's makes/
   -- attempts already has, so conditioning growth is just as visible.
-  tracks_time boolean not null default false
+  tracks_time boolean not null default false,
+  -- Added 2026-09-10, same field/reasoning as players.sport and
+  -- teams.sport: which sport this drill belongs to. Free text, defaults
+  -- to 'basketball' (every existing drill, default or custom, really is
+  -- basketball as of this migration). Lets the default library and any
+  -- future "browse drills" screen filter to a player's own sport instead
+  -- of mixing every sport's drills together once a second one has real
+  -- content. A custom drill inherits the sport of the player it's created
+  -- for at creation time (see createCustomDrill in lib/players.ts).
+  sport text not null default 'basketball',
+  -- Added 2026-09-10, Jay's real ask: a coach with a mixed infield/
+  -- outfield roster (or a single catcher) shouldn't have to scroll every
+  -- fielding drill to find the ones for their position. Nullable, generic
+  -- secondary filter within a category — not hardcoded to fielding or to
+  -- baseball/softball, just the only place it's populated today. Sourced
+  -- dynamically by the UI the same way category itself already is (see
+  -- listDrillCategories in lib/workouts.ts), so it only ever shows up
+  -- where real data exists for it.
+  position_group text
 );
 
 -- ---------------------------------------------------------------------------
@@ -943,6 +974,12 @@ grant execute on function accept_challenge(uuid) to authenticated;
 -- column list for a handful of SQL-standard reserved keywords. No quoting
 -- needed anywhere else this column is referenced (p.position, a plain
 -- select-list reference, is unambiguous).
+-- sport added 2026-09-10 (drop + recreate, since a RETURNS TABLE column
+-- addition changes the function's signature) so a teammate-view badge can
+-- show the sport-specific offseason icon like every other badge-render
+-- path, instead of being the one dark corner without it.
+drop function if exists get_teammates(uuid);
+
 create or replace function get_teammates(p_player_id uuid)
 returns table(
   id uuid,
@@ -952,7 +989,8 @@ returns table(
   height text,
   weight text,
   grad_year integer,
-  stats_visible_to_team boolean
+  stats_visible_to_team boolean,
+  sport text
 )
 language sql
 security definer
@@ -965,7 +1003,7 @@ as $$
   -- recorded on the resulting challenge doesn't matter functionally.
   select distinct on (p.id)
     p.id, p.display_name, tm_other.team_id,
-    p.position, p.height, p.weight, p.grad_year, p.stats_visible_to_team
+    p.position, p.height, p.weight, p.grad_year, p.stats_visible_to_team, p.sport
   from players p
   join team_memberships tm_other on tm_other.player_id = p.id
   join team_memberships tm_self on tm_self.team_id = tm_other.team_id
