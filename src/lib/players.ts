@@ -37,6 +37,22 @@ export const AVAILABLE_SPORTS = [
   { value: 'softball', label: 'Softball', comingSoon: false },
 ] as const;
 
+// Real bug Jay caught on-device 2026-09-10: the Drills tab icon was
+// hardcoded to a basketball in App.tsx and never changed when switching
+// to baseball/softball — same class of bug as the offseason badge icon
+// fixed earlier the same day (badges.ts), and now the single shared
+// source both pull from so the two can't drift out of sync again.
+const SPORT_ICON: Record<string, string> = {
+  basketball: '🏀',
+  baseball: '⚾',
+  softball: '🥎',
+};
+const SPORT_ICON_FALLBACK = '🎯';
+
+export function getSportIcon(sport: string): string {
+  return SPORT_ICON[sport] ?? SPORT_ICON_FALLBACK;
+}
+
 // Real convention gap Jay caught on-device: a makes/attempts rate reads
 // as a plain percentage in basketball ("72%") but as a 3-decimal average
 // with no leading zero in baseball/softball (".720", or "1.000" for a

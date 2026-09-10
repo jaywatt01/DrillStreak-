@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { useActiveSport } from '../lib/ActiveSportContext';
 import {
   ActivityIndicator,
   Alert,
@@ -90,14 +91,23 @@ export default function TeamBoardScreen() {
     | { teamId?: string; threadUserId?: string; view?: BoardView }
     | undefined;
 
+  const { sport: activeSport } = useActiveSport();
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
-  const [teams, setTeams] = useState<MyTeam[]>([]);
+  // Every team on the account, unfiltered — kept around so a push
+  // notification for a team outside the currently active sport can still
+  // resolve (see the sport-scoping effect below). `teams` is what
+  // actually renders: scoped to the active sport, the real fix for the
+  // bug Jay caught on-device (Team Chat mixing two sports' conversations
+  // together — two different sets of parents/coaches, obviously wrong).
+  const [allTeams, setAllTeams] = useState<MyTeam[]>([]);
+  const teams = useMemo(() => allTeams.filter((t) => t.sport === activeSport), [allTeams, activeSport]);
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
-  const activeTeam = teams.find((t) => t.id === activeTeamId) ?? null;
+  const activeTeam = allTeams.find((t) => t.id === activeTeamId) ?? null;
 
   const [view, setView] = useState<BoardView>('messages');
 
@@ -127,8 +137,7 @@ export default function TeamBoardScreen() {
       setMyUserId(userData.user?.id ?? null);
 
       const myTeams = await listMyTeams();
-      setTeams(myTeams);
-      setActiveTeamId((current) => current ?? myTeams[0]?.id ?? null);
+      setAllTeams(myTeams);
 
       // Not team-scoped — reconciles every event this device has ever
       // added, across every team, against what still exists server-side.
@@ -150,6 +159,22 @@ export default function TeamBoardScreen() {
     }
   }, [notificationParams?.teamId, notificationParams?.threadUserId, notificationParams?.view]);
 
+  // Keeps the selected team scoped to whichever sport is active, on
+  // first load and on every sport switch — real bug Jay caught
+  // on-device: this screen showed every team on the account at once
+  // regardless of sport, mixing two separate sets of parents/coaches
+  // into one feed. Skipped while a push notification is driving the
+  // selection (the effect above) so tapping a notification still opens
+  // the exact conversation it was about, even for a team outside the
+  // sport currently active.
+  useEffect(() => {
+    if (notificationParams?.teamId) return;
+    const stillValid = activeTeamId !== null && teams.some((t) => t.id === activeTeamId);
+    if (stillValid) return;
+    setActiveTeamId(teams[0]?.id ?? null);
+    setThread(null);
+  }, [teams, activeTeamId, notificationParams?.teamId]);
+
   useFocusEffect(
     useCallback(() => {
       load();
@@ -168,7 +193,7 @@ export default function TeamBoardScreen() {
       // A restricted account (self-signed-up player) only ever gets the
       // coach as a DM option — RLS would reject a DM to anyone else
       // anyway (team_messages_insert), so there's no point offering it.
-      const isRestricted = teams.find((t) => t.id === activeTeamId)?.restricted ?? false;
+      const isRestricted = allTeams.find((t) => t.id === activeTeamId)?.restricted ?? false;
       setContacts(
         isRestricted
           ? teamContacts.filter((c) => c.role === 'coach')
@@ -178,7 +203,7 @@ export default function TeamBoardScreen() {
     } catch (e) {
       setError(errorMessage(e, 'Failed to load team data.'));
     }
-  }, [activeTeamId, myUserId, teams]);
+  }, [activeTeamId, myUserId, allTeams]);
 
   useEffect(() => {
     loadTeamData();
