@@ -28,8 +28,11 @@ import {
   useParentEntitlement,
 } from '../lib/purchases';
 import { listMyInstitutionalTeams, InstitutionalTeam } from '../lib/institutionalAccess';
+import { useActiveSport } from '../lib/ActiveSportContext';
+import SportSwitcher from '../components/SportSwitcher';
 
 export default function AccountScreen() {
+  const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const [email, setEmail] = useState<string | null>(null);
   // Deliberately the raw RevenueCat signal only — NOT combined with
   // institutional (Team/Program) access like AddPlayerScreen/ProgressScreen/
@@ -63,11 +66,24 @@ export default function AccountScreen() {
     getMyDisplayName()
       .then((name) => setDisplayName(name ?? ''))
       .finally(() => setLoadingName(false));
+    listMyInstitutionalTeams()
+      .then(setInstitutionalTeams)
+      .catch(() => setInstitutionalTeams([]));
+  }, []);
+
+  // Separate effect, depends on activeSport/sportLoading (2026-09-10) —
+  // the badge roster is the one thing on this screen that's actually
+  // sport-scoped; everything above (name, email, institutional teams) is
+  // account-wide and only needs to load once.
+  useEffect(() => {
+    if (sportLoading) return;
+    setLoadingBadges(true);
     listMyPlayers()
       .then(async (myPlayers) => {
-        setPlayers(myPlayers);
+        const sportPlayers = myPlayers.filter((p) => p.sport === activeSport);
+        setPlayers(sportPlayers);
         const entries = await Promise.all(
-          myPlayers.map(async (p) => {
+          sportPlayers.map(async (p) => {
             const [all, activeSeason] = await Promise.all([listBadges(p.id), getActiveSeason(p.id)]);
             return [p.id, { all, currentSeason: filterCurrentBadges(all, activeSeason) }] as const;
           })
@@ -75,10 +91,7 @@ export default function AccountScreen() {
         setBadgesByPlayer(Object.fromEntries(entries));
       })
       .finally(() => setLoadingBadges(false));
-    listMyInstitutionalTeams()
-      .then(setInstitutionalTeams)
-      .catch(() => setInstitutionalTeams([]));
-  }, []);
+  }, [activeSport, sportLoading]);
 
   // Soft check, not a hard gate: a display_name is one value per account,
   // shared across every team that account is on, so a strict app-wide
@@ -168,6 +181,7 @@ export default function AccountScreen() {
         Manage your Parent and Coach memberships independently — both can be
         active on the same account at once.
       </Text>
+      <SportSwitcher />
 
       <View style={styles.nameCard}>
         <Text style={styles.tierLabel}>Your name</Text>

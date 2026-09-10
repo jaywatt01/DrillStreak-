@@ -3,6 +3,8 @@ import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView,
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
+import { useActiveSport } from '../lib/ActiveSportContext';
+import SportSwitcher from '../components/SportSwitcher';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import StreakCalendar from '../components/StreakCalendar';
 import {
@@ -57,6 +59,7 @@ type PlayerProgress = {
 
 export default function ProgressScreen() {
   const navigation = useNavigation();
+  const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const { hasParentTier, loading: entitlementLoading } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -72,10 +75,12 @@ export default function ProgressScreen() {
   const [deletingSeason, setDeletingSeason] = useState(false);
   const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
 
+  // Depends on activeSport/sportLoading (2026-09-10) — the sport switcher.
   const load = useCallback(async () => {
+    if (sportLoading) return;
     setError(null);
     try {
-      const players = await listMyPlayers();
+      const players = (await listMyPlayers()).filter((p) => p.sport === activeSport);
       const weekStart = mondayOfThisWeek();
       const institutionalAccessByPlayer = await getInstitutionalAccessByPlayer(
         players.map((p) => p.id)
@@ -120,7 +125,7 @@ export default function ProgressScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasParentTier]);
+  }, [hasParentTier, activeSport, sportLoading]);
 
   useFocusEffect(
     useCallback(() => {
@@ -235,6 +240,7 @@ export default function ProgressScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.sectionTitle}>Progress</Text>
+      <SportSwitcher />
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {progress.length === 0 ? (

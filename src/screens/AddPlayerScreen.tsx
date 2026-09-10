@@ -18,7 +18,6 @@ import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
   addCustomDrill,
   addPlayer,
-  AVAILABLE_SPORTS,
   CustomDrill,
   DEFAULT_DRILL_MINUTES,
   deleteDrill,
@@ -30,11 +29,14 @@ import {
   renameDrill,
   updatePlayerProfile,
 } from '../lib/players';
+import { useActiveSport } from '../lib/ActiveSportContext';
+import SportSwitcher from '../components/SportSwitcher';
 import { joinTeamByInviteCode } from '../lib/team';
 import { defaultLabel, getActiveSeason, renameSeason, Season, startInSeason, startOffseason, summarizeSeason, undoSeasonSwitch } from '../lib/seasons';
 
 export default function AddPlayerScreen() {
   const navigation = useNavigation();
+  const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,10 +55,6 @@ export default function AddPlayerScreen() {
   // gets the Team Chat coach-DM-only restriction (schema.sql's
   // is_player_restricted) once this player joins a team.
   const [newPlayerIsMe, setNewPlayerIsMe] = useState(false);
-  // Which default drill library this player gets. Set once here, not
-  // editable after creation yet (see the schema.sql comment on
-  // players.sport) — nothing downstream reads a mid-life sport change.
-  const [newPlayerSport, setNewPlayerSport] = useState<string>('basketball');
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
 
@@ -97,12 +95,20 @@ export default function AddPlayerScreen() {
   const [renameDrillVideoUrl, setRenameDrillVideoUrl] = useState('');
   const [savingDrillEdit, setSavingDrillEdit] = useState(false);
 
+  // Depends on sportLoading only, not activeSport itself (2026-09-10) —
+  // this fetches EVERY player regardless of sport (players stays the full
+  // list on purpose: the free-tier cap and institutional-access checks
+  // below are account-wide, not per-sport — confirmed directly against
+  // lib/purchases.ts, see DRILLSTREAK.md). visiblePlayers (below) is the
+  // sport-filtered view actually rendered as "your players."
   const load = useCallback(async () => {
+    if (sportLoading) return;
     try {
       const myPlayers = await listMyPlayers();
       setPlayers(myPlayers);
+      const sportPlayers = myPlayers.filter((p) => p.sport === activeSport);
       setSelectedPlayerId((current) =>
-        current && myPlayers.some((p) => p.id === current) ? current : myPlayers[0]?.id ?? null
+        current && sportPlayers.some((p) => p.id === current) ? current : sportPlayers[0]?.id ?? null
       );
       const institutionalAccessByPlayer = await getInstitutionalAccessByPlayer(
         myPlayers.map((p) => p.id)
@@ -114,7 +120,9 @@ export default function AddPlayerScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeSport, sportLoading]);
+
+  const visiblePlayers = players.filter((p) => p.sport === activeSport);
 
   useFocusEffect(
     useCallback(() => {
@@ -160,10 +168,9 @@ export default function AddPlayerScreen() {
     setAddingPlayer(true);
     setPlayerError(null);
     try {
-      const player = await addPlayer(newPlayerName.trim(), newPlayerIsMe, newPlayerSport);
+      const player = await addPlayer(newPlayerName.trim(), newPlayerIsMe, activeSport);
       setNewPlayerName('');
       setNewPlayerIsMe(false);
-      setNewPlayerSport('basketball');
       await load();
       setSelectedPlayerId(player.id);
     } catch (e) {
@@ -469,9 +476,12 @@ export default function AddPlayerScreen() {
       automaticallyAdjustKeyboardInsets
     >
       <Text style={styles.sectionTitle}>Your players</Text>
+      <SportSwitcher />
       {playerError ? <Text style={styles.error}>{playerError}</Text> : null}
-      {players.length === 0 ? (
-        <Text style={styles.placeholder}>No players linked yet — add one below.</Text>
+      {visiblePlayers.length === 0 ? (
+        <Text style={styles.placeholder}>
+          No {activeSport} players linked yet — add one below.
+        </Text>
       ) : (
         <>
           <Text style={styles.placeholder}>
@@ -480,7 +490,7 @@ export default function AddPlayerScreen() {
             player to edit their profile or delete them.
           </Text>
           <View style={styles.chipRow}>
-            {players.map((p) => (
+            {visiblePlayers.map((p) => (
               <Pressable
                 key={p.id}
                 style={[styles.chip, selectedPlayerId === p.id && styles.chipSelected]}
@@ -671,25 +681,11 @@ export default function AddPlayerScreen() {
           <Text style={[styles.whoChipText, newPlayerIsMe && styles.whoChipTextActive]}>This is me</Text>
         </Pressable>
       </View>
-      <Text style={styles.whoLabel}>What sport?</Text>
-      <View style={styles.whoRow}>
-        {AVAILABLE_SPORTS.map((sport) => (
-          <Pressable
-            key={sport.value}
-            style={[
-              styles.whoChip,
-              newPlayerSport === sport.value && styles.whoChipActive,
-              sport.comingSoon && styles.whoChipDisabled,
-            ]}
-            onPress={() => !sport.comingSoon && setNewPlayerSport(sport.value)}
-            disabled={sport.comingSoon}
-          >
-            <Text style={[styles.whoChipText, newPlayerSport === sport.value && styles.whoChipTextActive]}>
-              {sport.label}{sport.comingSoon ? ' (Soon)' : ''}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* No sport picker here (removed 2026-09-10) — a player created
+          while viewing a given sport just is that sport, same as every
+          other creation flow in the app now. Switch sport above to add a
+          player for a different one. */}
+      <Text style={styles.placeholder}>This player will be added as {activeSport}.</Text>
       <Pressable
         style={[styles.button, (!newPlayerName.trim() || addingPlayer) && styles.buttonDisabled]}
         onPress={handleAddPlayer}
@@ -704,7 +700,7 @@ export default function AddPlayerScreen() {
 
       <Text style={styles.sectionTitle}>Join a team</Text>
       <Text style={styles.placeholder}>
-        {players.length === 0
+        {visiblePlayers.length === 0
           ? 'Add a player above first, then enter a coach\'s invite code here.'
           : `Enter the invite code your coach gave you for ${
               players.find((p) => p.id === selectedPlayerId)?.display_name ?? 'the selected player'
@@ -719,7 +715,7 @@ export default function AddPlayerScreen() {
         autoCapitalize="none"
         value={inviteCode}
         onChangeText={setInviteCode}
-        editable={players.length > 0}
+        editable={visiblePlayers.length > 0}
       />
       <Pressable
         style={[
@@ -734,7 +730,7 @@ export default function AddPlayerScreen() {
 
       <Text style={styles.sectionTitle}>Add a custom drill</Text>
       <Text style={styles.placeholder}>
-        {players.length === 0
+        {visiblePlayers.length === 0
           ? 'Add a player above first.'
           : `Adds to ${players.find((p) => p.id === selectedPlayerId)?.display_name ?? 'the selected player'}'s drill library only — no limit on how many. Long-press a drill below to rename or delete it.`}
       </Text>

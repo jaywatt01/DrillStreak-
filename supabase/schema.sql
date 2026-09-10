@@ -1975,7 +1975,16 @@ create table profiles (
   -- has 20-30 families on it and generic labels stop being enough to
   -- recognize who's who. Set by the user themselves in Account — see
   -- list_team_contacts below for how it's preferred once set.
-  display_name text
+  display_name text,
+  -- Added 2026-09-10: the sport switcher. Which sport's players/teams the
+  -- whole app currently shows — nothing about any other sport's data is
+  -- ever hidden from the database, just from view until switched back.
+  -- Nullable — an account with this unset falls back client-side to its
+  -- own players'/teams' sport (see lib/activeSport.ts), so accounts that
+  -- predate this column need no backfill. Already covered by the existing
+  -- profiles_owner_update/profiles_owner_insert policies below — no new
+  -- RLS needed, same as display_name.
+  active_sport text
 );
 
 alter table profiles enable row level security;

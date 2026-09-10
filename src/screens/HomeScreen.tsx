@@ -22,9 +22,10 @@ import TeammatesModal from '../components/TeammatesModal';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import WorkoutBuilderModal from '../components/WorkoutBuilderModal';
 import { useParentEntitlement } from '../lib/purchases';
+import { useActiveSport } from '../lib/ActiveSportContext';
+import SportSwitcher from '../components/SportSwitcher';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
-  AVAILABLE_SPORTS,
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
   deleteCompletion,
@@ -144,6 +145,7 @@ function timeForToday(scheduledTime: string | null): Date {
 export default function HomeScreen() {
   const navigation = useNavigation();
   const route = useRoute();
+  const { sport: activeSport, loading: sportLoading } = useActiveSport();
   // Lets the Home dashboard's "View →" (challenges) link actually land on
   // the right player instead of wherever this screen was last scrolled —
   // real gap Jay caught 2026-08-25: navigate('Home') alone has no way to
@@ -331,10 +333,15 @@ export default function HomeScreen() {
     ]);
   };
 
+  // Depends on activeSport/sportLoading (2026-09-10) — the sport switcher.
+  // Filters to the currently active sport's players only; waits out
+  // sportLoading rather than racing it so this never briefly fetches with
+  // the context's 'basketball' placeholder before the real value resolves.
   const load = useCallback(async () => {
+    if (sportLoading) return;
     setError(null);
     try {
-      const players = await listMyPlayers();
+      const players = (await listMyPlayers()).filter((p) => p.sport === activeSport);
       const cardData = await Promise.all(
         players.map(async (player) => {
           const [
@@ -430,7 +437,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeSport, sportLoading]);
 
   // useFocusEffect, not useEffect — a tab navigator keeps every screen
   // mounted in the background, so a plain useEffect only ever fires once
@@ -909,69 +916,47 @@ export default function HomeScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      <SportSwitcher />
 
       {cards.length > 0 ? (() => {
-        // Grouped by sport (2026-09-10) — real bug caught on-device: this
-        // used to be one shared section sourced from cards[0] only, which
-        // was fine when every player on an account was the same sport
-        // (always true before this week) but broke the moment it wasn't —
-        // a softball kid's categories/drills would show even for a
-        // basketball-only household member with no way to reach them, and
-        // vice versa. One Quick Start section per sport represented; the
-        // common single-sport case renders exactly as before (one section,
-        // no sport label).
-        const bySport = new Map<string, typeof cards>();
-        for (const c of cards) {
-          const list = bySport.get(c.player.sport) ?? [];
-          list.push(c);
-          bySport.set(c.player.sport, list);
-        }
-        const sportGroups = Array.from(bySport.entries());
-        const showSportLabel = sportGroups.length > 1;
+        // Simplified back to one shared section (2026-09-10) — the
+        // earlier sport-grouped version was a same-day fix for the
+        // "mixed sports on one account" problem, superseded a few hours
+        // later by the sport switcher (see ActiveSportContext): every
+        // screen, including this one's own load(), now filters players to
+        // just the currently active sport, so cards can never span more
+        // than one sport again — the grouping logic was dead weight the
+        // moment that landed. Back to the original single-section version.
+        const categories = cards[0]?.categories ?? [];
+        if (categories.length === 0) return null;
         return (
-          <>
-            {sportGroups.map(([sport, groupCards]) => {
-              const categories = groupCards[0]?.categories ?? [];
-              if (categories.length === 0) return null;
-              return (
-                <View key={sport} style={styles.challengesSection}>
-                  <Text style={styles.sectionTitle}>
-                    {showSportLabel
-                      ? `Quick Start — ${AVAILABLE_SPORTS.find((s) => s.value === sport)?.label ?? sport}`
-                      : 'Quick Start'}
-                  </Text>
-                  <Text style={styles.buildWorkoutHint}>Tap a category for a random drill to assign.</Text>
-                  <View style={styles.chipRow}>
-                    {categories.map((cat) => (
-                      <Pressable
-                        key={cat}
-                        style={styles.chip}
-                        onPress={() => {
-                          const picked = pickRandomDrillFromCategory(groupCards[0]?.allDrills ?? [], cat);
-                          if (!picked) return;
-                          // Single-player-in-this-sport-group — no real
-                          // choice of who it's for, so assign it directly
-                          // and just confirm what happened (there's no
-                          // picker modal to show it in).
-                          if (groupCards.length === 1) {
-                            handleToggleSelection(groupCards[0].player.id, picked.id, false);
-                            Alert.alert(
-                              'Added',
-                              `"${picked.name}" added to ${groupCards[0].player.display_name}'s drills.`
-                            );
-                          } else {
-                            setQuickStartPickerFor({ drill: picked, sport });
-                          }
-                        }}
-                      >
-                        <Text style={styles.chipText}>{cat}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              );
-            })}
-          </>
+          <View style={styles.challengesSection}>
+            <Text style={styles.sectionTitle}>Quick Start</Text>
+            <Text style={styles.buildWorkoutHint}>Tap a category for a random drill to assign.</Text>
+            <View style={styles.chipRow}>
+              {categories.map((cat) => (
+                <Pressable
+                  key={cat}
+                  style={styles.chip}
+                  onPress={() => {
+                    const picked = pickRandomDrillFromCategory(cards[0]?.allDrills ?? [], cat);
+                    if (!picked) return;
+                    // Single-player account — no real choice of who it's
+                    // for, so assign it directly and just confirm what
+                    // happened (there's no picker modal to show it in).
+                    if (cards.length === 1) {
+                      handleToggleSelection(cards[0].player.id, picked.id, false);
+                      Alert.alert('Added', `"${picked.name}" added to ${cards[0].player.display_name}'s drills.`);
+                    } else {
+                      setQuickStartPickerFor({ drill: picked, sport: cards[0].player.sport });
+                    }
+                  }}
+                >
+                  <Text style={styles.chipText}>{cat}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         );
       })() : null}
 
