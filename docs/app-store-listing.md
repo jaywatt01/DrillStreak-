@@ -18,7 +18,7 @@ Secondary: Sports
 ## Promotional text (170 char max, editable anytime without review)
 Start the streak that changes your game. Every rep, verified — a real record of the work that gets athletes noticed. Free for coaches, forever.
 
-## Description
+## Description (growth-tracking bullets added Sep 10, 2026 — see WHAT IT DOES below)
 Every extra rep is a step toward something — a starting spot, a scholarship look, a coach who notices. DrillStreak turns that work into a verified, dated record instead of a guess.
 
 A coach creates a team and assigns drills to the roster each week. Players (or a parent, for younger athletes) log what they actually did — and everyone can see the consistency streak build. No more guessing whether the extra work is really getting done.
@@ -26,6 +26,8 @@ A coach creates a team and assigns drills to the roster each week. Players (or a
 WHAT IT DOES
 - Coaches: create a team, share an invite code, assign this week's drills, see your roster's real activity — all free, forever.
 - Players & parents: log completed drills in seconds, build a streak, add any drill to your calendar with your own time and duration.
+- Track real growth over time, not just a streak count: shooting percentages by drill category, conditioning reps and times together (so "faster" and "stronger" are actual numbers, not a feeling), and a season-by-season history to look back on.
+- Offseason mode swaps the daily streak for a weekly goal and a suggested focus area — built from the player's own numbers, not a generic tip.
 - Pick from a built-in drill library or create your own custom drills — nothing is locked to one sport.
 - One account can be both a coach and a parent at the same time.
 
@@ -41,7 +43,7 @@ Coach features are free permanently — they always will be.
 **Note on the credibility line above (added August 14, 2026):** kept deliberately un-named. The specific coach (Chris Hines, Minnesota Timberwolves) gave this feedback as a personal friend on a private call, not as a public endorsement — using his name in App Store copy without asking him first would be a real overstep, both as a courtesy and because his name carries an implied team/league affiliation he hasn't agreed to lend. Ask him directly before ever naming him here; the generic phrasing above is the safe version to ship in the meantime.
 
 ## Keywords (100 char max, comma-separated, no spaces after commas)
-basketball,training,drills,coach,streak,accountability,youth sports,workout,team,roster
+basketball,training,drills,coach,streak,progress,accountability,youth sports,workout,team,roster
 
 ## Support URL
 https://legal.drillstreak.com/support.html (lists support@drillstreak.com as the support contact)
