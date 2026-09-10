@@ -30,11 +30,15 @@ export const PLAYER_SELECT_COLUMNS =
 // basketball drill-library expansion. Baseball (30 drills: 7 hitting/7
 // pitching/11 fielding/5 conditioning) and softball (32: same but 9
 // pitching, covering the windmill-specific arm-care drills) both seeded
-// 2026-09-10 — see DRILLSTREAK.md.
+// 2026-09-10. Volleyball (55 drills across passing/digging/blocking/
+// hitting/setting/serving/conditioning, position-tagged for Outside
+// Hitter/Middle Blocker/Setter/Libero-DS/Opposite) seeded 2026-09-10 —
+// see DRILLSTREAK.md.
 export const AVAILABLE_SPORTS = [
   { value: 'basketball', label: 'Basketball', comingSoon: false },
   { value: 'baseball', label: 'Baseball', comingSoon: false },
   { value: 'softball', label: 'Softball', comingSoon: false },
+  { value: 'volleyball', label: 'Volleyball', comingSoon: false },
 ] as const;
 
 // Real bug Jay caught on-device 2026-09-10: the Drills tab icon was
@@ -46,6 +50,7 @@ const SPORT_ICON: Record<string, string> = {
   basketball: '🏀',
   baseball: '⚾',
   softball: '🥎',
+  volleyball: '🏐',
 };
 const SPORT_ICON_FALLBACK = '🎯';
 
