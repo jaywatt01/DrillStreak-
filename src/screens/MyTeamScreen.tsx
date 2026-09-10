@@ -809,7 +809,11 @@ export default function MyTeamScreen() {
                   rosterCompletions.some((c) => c.playerId === a.playerId && c.drillId === a.id);
                 return (
                   <View key={a.assignmentId} style={[styles.drillRow, completedByTarget && styles.drillRowDone]}>
-                    <Pressable style={styles.drillRowMain} onPress={() => openScheduler(a)}>
+                    <Pressable
+                      style={styles.drillRowMain}
+                      onPress={() => openScheduler(a)}
+                      disabled={completedByTarget}
+                    >
                       <View style={styles.drillRowText}>
                         <Text style={styles.drillName}>{a.name}</Text>
                         <Text style={styles.drillCategory}>

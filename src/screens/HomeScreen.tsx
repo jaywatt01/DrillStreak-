@@ -1128,8 +1128,25 @@ export default function HomeScreen() {
 
                 if (!c.accepted && !isChallenger) {
                   // Received, not yet responded to.
+                  //
+                  // Column layout here, not row (2026-09-10 real fix,
+                  // second attempt — the first, a plain minWidth: 0 on
+                  // challengeText, didn't hold on Android per Jay's
+                  // on-device check, iOS only). Root cause: challengeText
+                  // and modalButtonRow (which contains two flex: 1
+                  // buttons) were row-siblings inside challengeRow, itself
+                  // row-direction — so the buttons' flex: 1 was resolving
+                  // against modalButtonRow's own width, and modalButtonRow
+                  // had no defined width of its own (an auto-sized flex
+                  // item, sized by ITS content, which is exactly those
+                  // same flex: 1 buttons) — a circular sizing case Yoga's
+                  // iOS and Android engines evidently resolve differently.
+                  // Column layout removes the ambiguity outright: the
+                  // button row becomes a genuine full-width block below
+                  // the text, where flex: 1 unambiguously means "split
+                  // this row's own full width."
                   return (
-                    <View key={c.id} style={styles.challengeRow}>
+                    <View key={c.id} style={[styles.challengeRow, styles.challengeRowColumn]}>
                       <Text style={styles.challengeText}>{c.challengerName} challenged you!</Text>
                       <View style={styles.modalButtonRow}>
                         <Pressable
@@ -1718,6 +1735,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  // Overrides challengeRow's row direction for the pending-received card
+  // specifically (see its comment) — text on top, the two-button row
+  // below, both full-width, sidestepping the row-in-a-row flex:1
+  // ambiguity that caused the oversized-box bug on Android.
+  challengeRowColumn: { flexDirection: 'column', alignItems: 'stretch' },
   // minWidth: 0 — same real bug class as drillRowText above (2026-09-10),
   // reported on Android specifically: "X challenged you!" plus the
   // Decline/Accept buttons in one row, on a narrower/Android layout,
