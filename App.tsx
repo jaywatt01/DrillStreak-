@@ -7,9 +7,10 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
-import { ActiveSportProvider } from './src/lib/ActiveSportContext';
+import { ActiveSportProvider, useActiveSport } from './src/lib/ActiveSportContext';
 import { clearPurchasesUser, configurePurchases, identifyPurchasesUser } from './src/lib/purchases';
 import { registerForPushNotifications } from './src/lib/pushNotifications';
+import { getSportIcon } from './src/lib/players';
 import AuthScreen from './src/screens/AuthScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -22,9 +23,12 @@ import { colors } from './src/theme/colors';
 
 const Tab = createBottomTabNavigator();
 
+// Home's icon used to be a hardcoded basketball here — a real bug Jay
+// caught on-device 2026-09-10: it never changed on baseball/softball.
+// Fixed by pulling it from the active sport (see getSportIcon) instead of
+// this fixed table; every other tab's icon is genuinely sport-agnostic.
 const TAB_ICONS: Record<string, string> = {
   Dashboard: '🏠',
-  Home: '🏀',
   'My Team': '👥',
   'Add a Player': '➕',
   Progress: '📈',
@@ -147,38 +151,51 @@ export default function App() {
 
   return (
     <ActiveSportProvider>
-      <NavigationContainer
-        ref={navigationRef}
-        onReady={() => {
-          if (pendingNotificationResponse) {
-            navigateToNotificationTarget(pendingNotificationResponse);
-            pendingNotificationResponse = null;
-          }
-        }}
-      >
-        <StatusBar style="dark" />
-        <Tab.Navigator
-          screenOptions={({ route }) => ({
-            tabBarActiveTintColor: colors.primary,
-            tabBarInactiveTintColor: colors.textMuted,
-            headerTintColor: colors.text,
-            tabBarIcon: () => (
-              <Text style={{ fontSize: 18 }}>{TAB_ICONS[route.name]}</Text>
-            ),
-          })}
-        >
-          <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
-          <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
-          <Tab.Screen name="My Team" component={MyTeamScreen} />
-          {/* tabBarLabel only, not title — Jay's explicit call: the tab bar
-              reads "Players" (was getting cut off), but the screen itself
-              (its header) stays "Add a Player". */}
-          <Tab.Screen name="Add a Player" component={AddPlayerScreen} options={{ tabBarLabel: 'Players' }} />
-          <Tab.Screen name="Progress" component={ProgressScreen} />
-          <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
-          <Tab.Screen name="Account" component={AccountScreen} />
-        </Tab.Navigator>
-      </NavigationContainer>
+      <AppTabs />
     </ActiveSportProvider>
+  );
+}
+
+// Split out from App() so it can call useActiveSport() — that hook only
+// works below ActiveSportProvider in the tree, and App() itself renders
+// the provider rather than sitting inside it.
+function AppTabs() {
+  const { sport } = useActiveSport();
+
+  return (
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        if (pendingNotificationResponse) {
+          navigateToNotificationTarget(pendingNotificationResponse);
+          pendingNotificationResponse = null;
+        }
+      }}
+    >
+      <StatusBar style="dark" />
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textMuted,
+          headerTintColor: colors.text,
+          tabBarIcon: () => (
+            <Text style={{ fontSize: 18 }}>
+              {route.name === 'Home' ? getSportIcon(sport) : TAB_ICONS[route.name]}
+            </Text>
+          ),
+        })}
+      >
+        <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
+        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
+        <Tab.Screen name="My Team" component={MyTeamScreen} />
+        {/* tabBarLabel only, not title — Jay's explicit call: the tab bar
+            reads "Players" (was getting cut off), but the screen itself
+            (its header) stays "Add a Player". */}
+        <Tab.Screen name="Add a Player" component={AddPlayerScreen} options={{ tabBarLabel: 'Players' }} />
+        <Tab.Screen name="Progress" component={ProgressScreen} />
+        <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
+        <Tab.Screen name="Account" component={AccountScreen} />
+      </Tab.Navigator>
+    </NavigationContainer>
   );
 }

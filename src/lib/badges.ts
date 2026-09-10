@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getSportIcon } from './players';
 
 export type BadgeType =
   | 'streak_7'
@@ -54,17 +55,12 @@ const FIXED_BADGE_ICONS: Record<Exclude<BadgeType, 'offseason_completed'>, strin
 // silently assumed basketball. Fixed properly (sport-specific, not a
 // generic fallback) per Jay's ask for full consistency across sports —
 // getBadgeIcon threads `sport` through every render call site instead.
-// Falls back to a neutral icon for any future sport without a dedicated
-// one yet, so a new sport never regresses to showing a wrong sport's ball.
-const OFFSEASON_ICON_BY_SPORT: Record<string, string> = {
-  basketball: '🏀',
-  baseball: '⚾',
-  softball: '🥎',
-};
-const OFFSEASON_ICON_FALLBACK = '🎯';
-
+// Shares players.ts's getSportIcon (same fix applied to the Drills tab
+// icon the same day) rather than keeping a second sport->icon map here —
+// two maps that must stay identical is exactly how the tab icon drifted
+// out of sync with this one in the first place.
 export function getBadgeIcon(type: BadgeType, sport: string): string {
-  if (type === 'offseason_completed') return OFFSEASON_ICON_BY_SPORT[sport] ?? OFFSEASON_ICON_FALLBACK;
+  if (type === 'offseason_completed') return getSportIcon(sport);
   return FIXED_BADGE_ICONS[type];
 }
 

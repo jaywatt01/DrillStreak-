@@ -1363,19 +1363,30 @@ grant execute on function is_player_restricted(uuid, uuid) to authenticated;
 -- definer for the same reason as is_on_team; invite_code is deliberately
 -- returned null for guardian rows — teams_coach_access exists specifically
 -- to keep invite codes coach-only, preserved here rather than reopened.
-create or replace function list_my_teams()
-returns table(id uuid, name text, invite_code text, role text, restricted boolean)
+--
+-- `sport` added 2026-09-10: real bug Jay caught on-device — Team Chat
+-- showed every team on the account at once regardless of the active
+-- sport, so a coach running two sports (or a parent whose kids play two)
+-- saw both teams' conversations mixed together, obvious in hindsight
+-- (two different sets of parents/coaches) but missed when the sport
+-- switcher first shipped since this screen was never touched in that
+-- pass. Return type changed, so this needs drop+recreate rather than
+-- create-or-replace (same reason get_teammates was drop+recreate).
+drop function if exists list_my_teams();
+
+create function list_my_teams()
+returns table(id uuid, name text, invite_code text, role text, restricted boolean, sport text)
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select t.id, t.name, t.invite_code, 'coach'::text as role, false as restricted
+  select t.id, t.name, t.invite_code, 'coach'::text as role, false as restricted, t.sport
   from teams t
   where t.coach_user_id = auth.uid()
   union
   select distinct t.id, t.name, null::text as invite_code, 'guardian'::text as role,
-    is_player_restricted(t.id, auth.uid()) as restricted
+    is_player_restricted(t.id, auth.uid()) as restricted, t.sport
   from teams t
   join team_memberships tm on tm.team_id = t.id
   where is_player_owner_or_guardian(tm.player_id, auth.uid())

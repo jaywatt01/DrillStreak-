@@ -19,20 +19,29 @@ export type MyTeam = {
   // — can read the team-wide feed, but can only ever message the coach
   // directly, never post to the group or DM another family.
   restricted: boolean;
+  sport: string;
 };
 
 export async function listMyTeams(): Promise<MyTeam[]> {
   const { data, error } = await supabase.rpc('list_my_teams');
   if (error) throw error;
-  return (
-    data ?? []
-  ).map((row: { id: string; name: string; invite_code: string | null; role: TeamRole; restricted: boolean }) => ({
-    id: row.id,
-    name: row.name,
-    inviteCode: row.invite_code,
-    role: row.role,
-    restricted: row.restricted,
-  }));
+  return (data ?? []).map(
+    (row: {
+      id: string;
+      name: string;
+      invite_code: string | null;
+      role: TeamRole;
+      restricted: boolean;
+      sport: string;
+    }) => ({
+      id: row.id,
+      name: row.name,
+      inviteCode: row.invite_code,
+      role: row.role,
+      restricted: row.restricted,
+      sport: row.sport,
+    })
+  );
 }
 
 export type TeamContact = { userId: string; label: string; role: TeamRole };
