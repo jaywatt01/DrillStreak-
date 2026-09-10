@@ -45,7 +45,12 @@ export type RosterCompletion = {
   drillId: string;
 };
 
-export async function getMyTeam(): Promise<Team | null> {
+// Scoped to the sport switcher's active sport (2026-09-10) — a coach can
+// now genuinely have more than one team (one per sport), where before
+// this only ever mattered in theory (no unique constraint stopped a
+// second team row, but the app only ever fetched the oldest one). Each
+// sport gets its own team lookup instead of a single global "my team."
+export async function getMyTeamForSport(sport: string): Promise<Team | null> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
@@ -54,6 +59,7 @@ export async function getMyTeam(): Promise<Team | null> {
     .from('teams')
     .select('id, name, invite_code, prompt_for_results, sport')
     .eq('coach_user_id', userId)
+    .eq('sport', sport)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -61,7 +67,7 @@ export async function getMyTeam(): Promise<Team | null> {
   return data as Team | null;
 }
 
-export async function createTeam(name: string, sport: string = 'basketball'): Promise<Team> {
+export async function createTeam(name: string, sport: string): Promise<Team> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');

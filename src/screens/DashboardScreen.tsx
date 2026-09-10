@@ -14,6 +14,8 @@ import { getUpcomingTeamEvents } from '../lib/teamEvents';
 import { deleteScheduledDrill, getUpcomingScheduledDrills } from '../lib/schedule';
 import { Challenge, getChallengesForPlayer } from '../lib/challenges';
 import { useParentEntitlement } from '../lib/purchases';
+import { useActiveSport } from '../lib/ActiveSportContext';
+import SportSwitcher from '../components/SportSwitcher';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 
 type ScheduleItem = {
@@ -77,6 +79,7 @@ function daysLeft(endsAt: string | null): number {
 // only new summary rows that point at what already exists.
 export default function DashboardScreen() {
   const navigation = useNavigation();
+  const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,10 +112,12 @@ export default function DashboardScreen() {
   }, [viewingProfileFor]);
   const hasParentTier = hasPurchasedParentTier || selfViewInstitutionalAccess;
 
+  // Depends on activeSport/sportLoading (2026-09-10) — the sport switcher.
   const load = useCallback(async () => {
+    if (sportLoading) return;
     setError(null);
     try {
-      const players = await listMyPlayers();
+      const players = (await listMyPlayers()).filter((p) => p.sport === activeSport);
       const weekStart = mondayOfThisWeek();
       const data = await Promise.all(
         players.map(async (player) => {
@@ -175,7 +180,7 @@ export default function DashboardScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeSport, sportLoading]);
 
   useFocusEffect(
     useCallback(() => {
@@ -228,10 +233,15 @@ export default function DashboardScreen() {
       >
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        <SportSwitcher />
+
         {cards.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.sectionTitle}>No players yet</Text>
-            <Text style={styles.placeholder}>Add a player from the Add a Player tab to get started.</Text>
+            <Text style={styles.placeholder}>
+              Add a player from the Add a Player tab to get started — it'll be a {activeSport} player.
+              Already have one in a different sport? Switch above first.
+            </Text>
           </View>
         ) : (
           cards.map((card) => (

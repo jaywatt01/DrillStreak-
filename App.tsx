@@ -7,6 +7,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
+import { ActiveSportProvider } from './src/lib/ActiveSportContext';
 import { clearPurchasesUser, configurePurchases, identifyPurchasesUser } from './src/lib/purchases';
 import { registerForPushNotifications } from './src/lib/pushNotifications';
 import AuthScreen from './src/screens/AuthScreen';
@@ -145,37 +146,39 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      onReady={() => {
-        if (pendingNotificationResponse) {
-          navigateToNotificationTarget(pendingNotificationResponse);
-          pendingNotificationResponse = null;
-        }
-      }}
-    >
-      <StatusBar style="dark" />
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.textMuted,
-          headerTintColor: colors.text,
-          tabBarIcon: () => (
-            <Text style={{ fontSize: 18 }}>{TAB_ICONS[route.name]}</Text>
-          ),
-        })}
+    <ActiveSportProvider>
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          if (pendingNotificationResponse) {
+            navigateToNotificationTarget(pendingNotificationResponse);
+            pendingNotificationResponse = null;
+          }
+        }}
       >
-        <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
-        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
-        <Tab.Screen name="My Team" component={MyTeamScreen} />
-        {/* tabBarLabel only, not title — Jay's explicit call: the tab bar
-            reads "Players" (was getting cut off), but the screen itself
-            (its header) stays "Add a Player". */}
-        <Tab.Screen name="Add a Player" component={AddPlayerScreen} options={{ tabBarLabel: 'Players' }} />
-        <Tab.Screen name="Progress" component={ProgressScreen} />
-        <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
-        <Tab.Screen name="Account" component={AccountScreen} />
-      </Tab.Navigator>
-    </NavigationContainer>
+        <StatusBar style="dark" />
+        <Tab.Navigator
+          screenOptions={({ route }) => ({
+            tabBarActiveTintColor: colors.primary,
+            tabBarInactiveTintColor: colors.textMuted,
+            headerTintColor: colors.text,
+            tabBarIcon: () => (
+              <Text style={{ fontSize: 18 }}>{TAB_ICONS[route.name]}</Text>
+            ),
+          })}
+        >
+          <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
+          <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
+          <Tab.Screen name="My Team" component={MyTeamScreen} />
+          {/* tabBarLabel only, not title — Jay's explicit call: the tab bar
+              reads "Players" (was getting cut off), but the screen itself
+              (its header) stays "Add a Player". */}
+          <Tab.Screen name="Add a Player" component={AddPlayerScreen} options={{ tabBarLabel: 'Players' }} />
+          <Tab.Screen name="Progress" component={ProgressScreen} />
+          <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
+          <Tab.Screen name="Account" component={AccountScreen} />
+        </Tab.Navigator>
+      </NavigationContainer>
+    </ActiveSportProvider>
   );
 }

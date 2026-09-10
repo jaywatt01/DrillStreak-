@@ -19,8 +19,10 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { colors } from '../theme/colors';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
+import SportSwitcher from '../components/SportSwitcher';
 import WeekDotsRow from '../components/WeekDotsRow';
-import { AVAILABLE_SPORTS, DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
+import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
+import { useActiveSport } from '../lib/ActiveSportContext';
 import {
   assignDrillToPlayer,
   assignDrillToTeam,
@@ -29,7 +31,7 @@ import {
   deleteTeam,
   getAvailableDrills,
   getMyNoteForPlayer,
-  getMyTeam,
+  getMyTeamForSport,
   getRoster,
   getRosterCompletionsThisWeek,
   getWeeklyTeamAssignments,
@@ -81,6 +83,7 @@ function formatScheduleLabel(scheduledTime: string | null, durationMinutes: numb
 
 export default function MyTeamScreen() {
   const navigation = useNavigation();
+  const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [team, setTeam] = useState<Team | null>(null);
@@ -89,7 +92,6 @@ export default function MyTeamScreen() {
   const [assignedDrills, setAssignedDrills] = useState<AssignedDrill[]>([]);
   const [rosterCompletions, setRosterCompletions] = useState<RosterCompletion[]>([]);
   const [teamName, setTeamName] = useState('');
-  const [newTeamSport, setNewTeamSport] = useState<string>('basketball');
   const [creating, setCreating] = useState(false);
   const [togglingDrillId, setTogglingDrillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,10 +159,17 @@ export default function MyTeamScreen() {
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
 
+  // Depends on activeSport (2026-09-10) — this function's identity
+  // changes whenever the sport switcher fires, which useFocusEffect below
+  // picks up and reloads for automatically, same as a real focus event.
+  // Waits on sportLoading rather than racing it — getMyTeamForSport needs
+  // the real active sport, not the 'basketball' default the context
+  // starts with before its own first load resolves.
   const load = useCallback(async () => {
+    if (sportLoading) return;
     setError(null);
     try {
-      const myTeam = await getMyTeam();
+      const myTeam = await getMyTeamForSport(activeSport);
       setTeam(myTeam);
       if (myTeam) {
         const [rosterData, drills, assigned] = await Promise.all([
@@ -173,6 +182,11 @@ export default function MyTeamScreen() {
         setAssignedDrills(assigned);
         const completions = await getRosterCompletionsThisWeek(rosterData.map((p) => p.id));
         setRosterCompletions(completions);
+      } else {
+        setRoster([]);
+        setAvailableDrills([]);
+        setAssignedDrills([]);
+        setRosterCompletions([]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load.');
@@ -180,7 +194,7 @@ export default function MyTeamScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeSport, sportLoading]);
 
   useFocusEffect(
     useCallback(() => {
@@ -248,9 +262,8 @@ export default function MyTeamScreen() {
     setCreating(true);
     setError(null);
     try {
-      await createTeam(teamName.trim(), newTeamSport);
+      await createTeam(teamName.trim(), activeSport);
       setTeamName('');
-      setNewTeamSport('basketball');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create team.');
@@ -605,8 +618,10 @@ export default function MyTeamScreen() {
           <Text style={styles.sectionTitle}>Create your team</Text>
           <Text style={styles.placeholder}>
             Create a team to get a roster, an invite code for your players,
-            and the ability to assign this week's drills.
+            and the ability to assign this week's drills. This creates a{' '}
+            {activeSport} team — switch sports first if you meant a different one.
           </Text>
+          <SportSwitcher />
           <TextInput
             style={styles.input}
             placeholder="Team name"
@@ -614,24 +629,6 @@ export default function MyTeamScreen() {
             value={teamName}
             onChangeText={setTeamName}
           />
-          <View style={styles.chipRow}>
-            {AVAILABLE_SPORTS.map((sport) => (
-              <Pressable
-                key={sport.value}
-                style={[
-                  styles.chip,
-                  newTeamSport === sport.value && styles.chipSelected,
-                  sport.comingSoon && styles.chipDisabled,
-                ]}
-                onPress={() => !sport.comingSoon && setNewTeamSport(sport.value)}
-                disabled={sport.comingSoon}
-              >
-                <Text style={[styles.chipText, newTeamSport === sport.value && styles.chipTextSelected]}>
-                  {sport.label}{sport.comingSoon ? ' (Soon)' : ''}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
           <Pressable
             style={[styles.button, (!teamName.trim() || creating) && styles.buttonDisabled]}
             onPress={handleCreateTeam}
@@ -646,6 +643,7 @@ export default function MyTeamScreen() {
         </View>
       ) : (
         <>
+          <SportSwitcher />
           <View style={styles.teamNameRow}>
             <Text style={styles.teamName}>{team.name}</Text>
             <Pressable onPress={handleTeamOptions}>
