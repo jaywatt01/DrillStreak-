@@ -82,7 +82,9 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<DashboardCard[]>([]);
-  const [viewingProfileFor, setViewingProfileFor] = useState<{ id: string; name: string } | null>(null);
+  const [viewingProfileFor, setViewingProfileFor] = useState<{ id: string; name: string; sport: string } | null>(
+    null
+  );
   const [teammatesForPlayerId, setTeammatesForPlayerId] = useState<string | null>(null);
   // Institutional (Team/Program) access is per-player, not account-level —
   // fetched fresh whenever the self-view profile changes, combined with the
@@ -235,7 +237,7 @@ export default function DashboardScreen() {
           cards.map((card) => (
             <View key={card.player.id} style={styles.card}>
               <Pressable
-                onPress={() => setViewingProfileFor({ id: card.player.id, name: card.player.display_name })}
+                onPress={() => setViewingProfileFor({ id: card.player.id, name: card.player.display_name, sport: card.player.sport })}
               >
                 <Text style={styles.playerName}>{card.player.display_name}</Text>
               </Pressable>
@@ -258,10 +260,14 @@ export default function DashboardScreen() {
 
               <Pressable
                 style={styles.statRow}
-                onPress={() => setViewingProfileFor({ id: card.player.id, name: card.player.display_name })}
+                onPress={() => setViewingProfileFor({ id: card.player.id, name: card.player.display_name, sport: card.player.sport })}
               >
                 <Text style={styles.statLabel}>Badges</Text>
-                <BadgeIconStrip currentSeasonBadges={card.currentSeasonBadges} allBadges={card.allBadges} />
+                <BadgeIconStrip
+                  currentSeasonBadges={card.currentSeasonBadges}
+                  allBadges={card.allBadges}
+                  sport={card.player.sport}
+                />
               </Pressable>
 
               {card.teams.length > 0 ? (
@@ -323,6 +329,7 @@ export default function DashboardScreen() {
         <CoachPlayerStatsModal
           playerId={viewingProfileFor.id}
           playerName={viewingProfileFor.name}
+          playerSport={viewingProfileFor.sport}
           hasParentTier={hasParentTier}
           onClose={() => setViewingProfileFor(null)}
         />

@@ -4,8 +4,8 @@ import {
   Badge,
   BADGE_CATALOG_ORDER,
   BADGE_HOW_TO_EARN,
-  BADGE_ICONS,
   BADGE_LABELS,
+  getBadgeIcon,
   SEASON_SCOPED_BADGE_TYPES,
 } from '../lib/badges';
 
@@ -23,6 +23,7 @@ type Props = {
   // story ("hit the 100-day badge 4 seasons running"), same recruiting-
   // narrative value as challenge_won/offseason_completed's own counts.
   allBadges: Badge[];
+  sport: string;
 };
 
 // The full catalog, always all 6 entries regardless of what's actually
@@ -31,7 +32,7 @@ type Props = {
 // "what I have." Streak badges (2026-08-25: now season-scoped) light up
 // based on this season alone, but every type — including streak badges —
 // shows its real lifetime count once earned more than zero times.
-export default function BadgeLegend({ currentSeasonBadges, allBadges }: Props) {
+export default function BadgeLegend({ currentSeasonBadges, allBadges, sport }: Props) {
   const currentSeasonTypes = new Set(currentSeasonBadges.map((b) => b.type));
   const lifetimeCountByType = new Map<string, number>();
   for (const b of allBadges) {
@@ -46,7 +47,7 @@ export default function BadgeLegend({ currentSeasonBadges, allBadges }: Props) {
         const earned = isSeasonScoped ? currentSeasonTypes.has(type) : lifetimeCount > 0;
         return (
           <View key={type} style={[styles.card, earned ? styles.cardEarned : styles.cardUnearned]}>
-            <Text style={[styles.icon, !earned && styles.iconUnearned]}>{BADGE_ICONS[type]}</Text>
+            <Text style={[styles.icon, !earned && styles.iconUnearned]}>{getBadgeIcon(type, sport)}</Text>
             <Text style={[styles.label, earned ? styles.labelEarned : styles.labelUnearned]}>
               {BADGE_LABELS[type]}
             </Text>

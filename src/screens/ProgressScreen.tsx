@@ -25,7 +25,7 @@ import {
 } from '../lib/players';
 import { mondayOfThisWeek } from '../lib/date';
 import { deleteSeason, getActiveSeason, listSeasonHistory, renameSeason, Season, SeasonSummary, summarizeSeason } from '../lib/seasons';
-import { BADGE_ICONS, BADGE_LABELS } from '../lib/badges';
+import { BADGE_LABELS, getBadgeIcon } from '../lib/badges';
 
 // How many weeks of the visual calendar a Parent-membership viewer sees.
 // Free tier sees 1 (this week only, same bound as the list view below) —
@@ -62,7 +62,9 @@ export default function ProgressScreen() {
   const [progress, setProgress] = useState<PlayerProgress[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<{ title: string; entries: ShootingBreakdownEntry[] } | null>(null);
-  const [seasonDetail, setSeasonDetail] = useState<{ season: Season; summary: SeasonSummary } | null>(null);
+  const [seasonDetail, setSeasonDetail] = useState<{ season: Season; summary: SeasonSummary; sport: string } | null>(
+    null
+  );
   const [loadingSeasonDetail, setLoadingSeasonDetail] = useState<string | null>(null);
   const [seasonRenameText, setSeasonRenameText] = useState('');
   const [savingSeasonRename, setSavingSeasonRename] = useState(false);
@@ -138,11 +140,11 @@ export default function ProgressScreen() {
     setBreakdown({ title, entries: computeShootingBreakdown(history, matches) });
   };
 
-  const openSeasonDetail = async (playerId: string, season: Season) => {
+  const openSeasonDetail = async (playerId: string, season: Season, sport: string) => {
     setLoadingSeasonDetail(season.id);
     try {
       const summary = await summarizeSeason(playerId, season.id);
-      setSeasonDetail({ season, summary });
+      setSeasonDetail({ season, summary, sport });
       setSeasonRenameText(season.label);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load season detail.');
@@ -350,7 +352,7 @@ export default function ProgressScreen() {
                   <Pressable
                     key={s.id}
                     style={styles.seasonRow}
-                    onPress={() => openSeasonDetail(player.id, s)}
+                    onPress={() => openSeasonDetail(player.id, s, player.sport)}
                     disabled={loadingSeasonDetail === s.id}
                   >
                     <Text style={styles.seasonRowLabel}>{s.label}</Text>
@@ -516,7 +518,7 @@ export default function ProgressScreen() {
                       {seasonDetail.summary.badges.map((b) => (
                         <View key={b.id} style={styles.seasonBadgeChip}>
                           <Text style={styles.seasonBadgeChipText}>
-                            {BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}
+                            {getBadgeIcon(b.type, seasonDetail.sport)} {BADGE_LABELS[b.type]}
                           </Text>
                         </View>
                       ))}

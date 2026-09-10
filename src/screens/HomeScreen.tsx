@@ -64,9 +64,9 @@ import {
   awardChallengeWonBadgeIfNeeded,
   awardStreakBadgesIfNeeded,
   Badge,
-  BADGE_ICONS,
   BADGE_LABELS,
   filterCurrentBadges,
+  getBadgeIcon,
   listBadges,
 } from '../lib/badges';
 import { hasSharedBadgeSince, shareBadgeToTeam } from '../lib/teamMessages';
@@ -188,7 +188,9 @@ export default function HomeScreen() {
   // now with hasParentTier passed so a free-tier account's own full
   // history stays paywalled here too (see the prop's comment in that
   // component for the bypass this closes).
-  const [viewingOwnProfileFor, setViewingOwnProfileFor] = useState<{ id: string; name: string } | null>(null);
+  const [viewingOwnProfileFor, setViewingOwnProfileFor] = useState<{ id: string; name: string; sport: string } | null>(
+    null
+  );
   const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   // Institutional (Team/Program) access is per-player, not account-level —
   // fetched fresh whenever the self-view profile changes, combined with the
@@ -471,10 +473,11 @@ export default function HomeScreen() {
     playerId: string,
     activeSeason: Season | null,
     teams: { id: string; name: string }[],
-    badge: Badge
+    badge: Badge,
+    sport: string
   ) => {
     const label = BADGE_LABELS[badge.type];
-    const icon = BADGE_ICONS[badge.type];
+    const icon = getBadgeIcon(badge.type, sport);
     // Share-once-per-season lock (Jay-requested, 2026-08-25): checked
     // right before the insert, not just relied on as a UI-only guard — the
     // whole point is stopping the same brag from going out to the team
@@ -979,7 +982,11 @@ export default function HomeScreen() {
             }}
           >
             <View style={styles.playerNameRow}>
-              <Pressable onPress={() => setViewingOwnProfileFor({ id: player.id, name: player.display_name })}>
+              <Pressable
+                onPress={() =>
+                  setViewingOwnProfileFor({ id: player.id, name: player.display_name, sport: player.sport })
+                }
+              >
                 <Text style={styles.playerName}>{player.display_name}</Text>
               </Pressable>
               {/* Scoped per-player now (2026-08-25, real gap Jay caught) —
@@ -1056,9 +1063,9 @@ export default function HomeScreen() {
                       <Pressable
                         key={b.id}
                         style={[styles.chip, styles.chipBadge]}
-                        onLongPress={() => handleShareBadge(player.id, activeSeason, teams, b)}
+                        onLongPress={() => handleShareBadge(player.id, activeSeason, teams, b, player.sport)}
                       >
-                        <Text style={styles.chipText}>{BADGE_ICONS[b.type]} {BADGE_LABELS[b.type]}</Text>
+                        <Text style={styles.chipText}>{getBadgeIcon(b.type, player.sport)} {BADGE_LABELS[b.type]}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -1527,6 +1534,7 @@ export default function HomeScreen() {
       <CoachPlayerStatsModal
         playerId={viewingOwnProfileFor.id}
         playerName={viewingOwnProfileFor.name}
+        playerSport={viewingOwnProfileFor.sport}
         hasParentTier={hasParentTier}
         onClose={() => setViewingOwnProfileFor(null)}
       />

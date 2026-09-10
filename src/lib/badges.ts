@@ -39,23 +39,34 @@ export const BADGE_LABELS: Record<BadgeType, string> = {
 // milestones read as a visible progression, not four random icons. The
 // two "event" badges (challenge_won, offseason_completed) get icons that
 // don't visually collide with the streak series or each other.
-//
-// offseason_completed was 🏀 until 2026-09-10 — a real bug, not caught
-// until baseball/softball shipped: the badge system itself needed zero
-// changes for a new sport (streak/challenge/offseason mechanics never
-// reference category or sport at all), but this one icon silently
-// assumed basketball. Fixed to a sport-neutral icon rather than threading
-// `sport` through the 4 render call sites (BadgeIconStrip, BadgeLegend,
-// HomeScreen's share text, ProgressScreen) for a single emoji swap —
-// disproportionate plumbing for what this actually needed.
-export const BADGE_ICONS: Record<BadgeType, string> = {
+const FIXED_BADGE_ICONS: Record<Exclude<BadgeType, 'offseason_completed'>, string> = {
   streak_7: '🔥',
   streak_30: '⚡',
   streak_60: '🌟',
   streak_100: '👑',
   challenge_won: '🏆',
-  offseason_completed: '🎯',
 };
+
+// offseason_completed was a hardcoded 🏀 until 2026-09-10 — a real bug,
+// not caught until baseball/softball shipped: the badge system itself
+// needed zero other changes for a new sport (streak/challenge/offseason
+// mechanics never reference category or sport at all), but this one icon
+// silently assumed basketball. Fixed properly (sport-specific, not a
+// generic fallback) per Jay's ask for full consistency across sports —
+// getBadgeIcon threads `sport` through every render call site instead.
+// Falls back to a neutral icon for any future sport without a dedicated
+// one yet, so a new sport never regresses to showing a wrong sport's ball.
+const OFFSEASON_ICON_BY_SPORT: Record<string, string> = {
+  basketball: '🏀',
+  baseball: '⚾',
+  softball: '🥎',
+};
+const OFFSEASON_ICON_FALLBACK = '🎯';
+
+export function getBadgeIcon(type: BadgeType, sport: string): string {
+  if (type === 'offseason_completed') return OFFSEASON_ICON_BY_SPORT[sport] ?? OFFSEASON_ICON_FALLBACK;
+  return FIXED_BADGE_ICONS[type];
+}
 
 export const BADGE_HOW_TO_EARN: Record<BadgeType, string> = {
   streak_7: 'Log a drill 7 days in a row this season.',

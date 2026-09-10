@@ -1250,6 +1250,7 @@ export default function MyTeamScreen() {
         <CoachPlayerStatsModal
           playerId={statsPlayer.id}
           playerName={statsPlayer.display_name}
+          playerSport={team?.sport ?? 'basketball'}
           onClose={closeStatsPlayer}
         />
       ) : null}

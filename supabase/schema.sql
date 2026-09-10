@@ -974,6 +974,12 @@ grant execute on function accept_challenge(uuid) to authenticated;
 -- column list for a handful of SQL-standard reserved keywords. No quoting
 -- needed anywhere else this column is referenced (p.position, a plain
 -- select-list reference, is unambiguous).
+-- sport added 2026-09-10 (drop + recreate, since a RETURNS TABLE column
+-- addition changes the function's signature) so a teammate-view badge can
+-- show the sport-specific offseason icon like every other badge-render
+-- path, instead of being the one dark corner without it.
+drop function if exists get_teammates(uuid);
+
 create or replace function get_teammates(p_player_id uuid)
 returns table(
   id uuid,
@@ -983,7 +989,8 @@ returns table(
   height text,
   weight text,
   grad_year integer,
-  stats_visible_to_team boolean
+  stats_visible_to_team boolean,
+  sport text
 )
 language sql
 security definer
@@ -996,7 +1003,7 @@ as $$
   -- recorded on the resulting challenge doesn't matter functionally.
   select distinct on (p.id)
     p.id, p.display_name, tm_other.team_id,
-    p.position, p.height, p.weight, p.grad_year, p.stats_visible_to_team
+    p.position, p.height, p.weight, p.grad_year, p.stats_visible_to_team, p.sport
   from players p
   join team_memberships tm_other on tm_other.player_id = p.id
   join team_memberships tm_self on tm_self.team_id = tm_other.team_id

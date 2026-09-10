@@ -223,6 +223,7 @@ export default function AccountScreen() {
                 <BadgeIconStrip
                   currentSeasonBadges={badgesByPlayer[p.id]?.currentSeason ?? []}
                   allBadges={badgesByPlayer[p.id]?.all ?? []}
+                  sport={p.sport}
                 />
               </Pressable>
             ))
@@ -249,6 +250,7 @@ export default function AccountScreen() {
                 <BadgeLegend
                   currentSeasonBadges={badgesByPlayer[viewingBadgesFor.id]?.currentSeason ?? []}
                   allBadges={badgesByPlayer[viewingBadgesFor.id]?.all ?? []}
+                  sport={viewingBadgesFor.sport}
                 />
               ) : null}
             </ScrollView>
