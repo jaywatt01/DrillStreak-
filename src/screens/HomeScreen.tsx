@@ -24,12 +24,14 @@ import WorkoutBuilderModal from '../components/WorkoutBuilderModal';
 import { useParentEntitlement } from '../lib/purchases';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
+  AVAILABLE_SPORTS,
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
   deleteCompletion,
   Drill,
   DrillResult,
   formatPlayerBio,
+  formatShootingPct,
   getCompletionDates,
   getTodayCompletions,
   getWeeklyDrills,
@@ -239,7 +241,12 @@ export default function HomeScreen() {
   // ages/skill levels shouldn't get the same suggestion auto-applied to
   // everyone. Tapping a Quick Start drill opens this picker to choose
   // which player(s) it's actually for, instead of broadcasting to all.
-  const [quickStartPickerFor, setQuickStartPickerFor] = useState<Drill | null>(null);
+  // sport carried alongside the drill (2026-09-10) — real bug caught
+  // on-device: with a mixed-sport account (e.g. 3 basketball kids + 1
+  // softball kid), the picker below used to list every player with no
+  // sport check, so a softball drill could get assigned to a basketball
+  // kid. The picker now only offers players matching this sport.
+  const [quickStartPickerFor, setQuickStartPickerFor] = useState<{ drill: Drill; sport: string } | null>(null);
   // Tracks the one drill/workout currently being added or removed, so its
   // own row can show a spinner without blocking every other row on the
   // card — same shape as markingId/addingToCalendarId elsewhere here.
@@ -904,36 +911,67 @@ export default function HomeScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {cards.length > 0 ? (() => {
-        const categories = cards[0]?.categories ?? [];
-        if (categories.length === 0) return null;
+        // Grouped by sport (2026-09-10) — real bug caught on-device: this
+        // used to be one shared section sourced from cards[0] only, which
+        // was fine when every player on an account was the same sport
+        // (always true before this week) but broke the moment it wasn't —
+        // a softball kid's categories/drills would show even for a
+        // basketball-only household member with no way to reach them, and
+        // vice versa. One Quick Start section per sport represented; the
+        // common single-sport case renders exactly as before (one section,
+        // no sport label).
+        const bySport = new Map<string, typeof cards>();
+        for (const c of cards) {
+          const list = bySport.get(c.player.sport) ?? [];
+          list.push(c);
+          bySport.set(c.player.sport, list);
+        }
+        const sportGroups = Array.from(bySport.entries());
+        const showSportLabel = sportGroups.length > 1;
         return (
-          <View style={styles.challengesSection}>
-            <Text style={styles.sectionTitle}>Quick Start</Text>
-            <Text style={styles.buildWorkoutHint}>Tap a category for a random drill to assign.</Text>
-            <View style={styles.chipRow}>
-              {categories.map((cat) => (
-                <Pressable
-                  key={cat}
-                  style={styles.chip}
-                  onPress={() => {
-                    const picked = pickRandomDrillFromCategory(cards[0]?.allDrills ?? [], cat);
-                    if (!picked) return;
-                    // Single-player account — no real choice of who it's
-                    // for, so assign it directly and just confirm what
-                    // happened (there's no picker modal to show it in).
-                    if (cards.length === 1) {
-                      handleToggleSelection(cards[0].player.id, picked.id, false);
-                      Alert.alert('Added', `"${picked.name}" added to ${cards[0].player.display_name}'s drills.`);
-                    } else {
-                      setQuickStartPickerFor(picked);
-                    }
-                  }}
-                >
-                  <Text style={styles.chipText}>{cat}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
+          <>
+            {sportGroups.map(([sport, groupCards]) => {
+              const categories = groupCards[0]?.categories ?? [];
+              if (categories.length === 0) return null;
+              return (
+                <View key={sport} style={styles.challengesSection}>
+                  <Text style={styles.sectionTitle}>
+                    {showSportLabel
+                      ? `Quick Start — ${AVAILABLE_SPORTS.find((s) => s.value === sport)?.label ?? sport}`
+                      : 'Quick Start'}
+                  </Text>
+                  <Text style={styles.buildWorkoutHint}>Tap a category for a random drill to assign.</Text>
+                  <View style={styles.chipRow}>
+                    {categories.map((cat) => (
+                      <Pressable
+                        key={cat}
+                        style={styles.chip}
+                        onPress={() => {
+                          const picked = pickRandomDrillFromCategory(groupCards[0]?.allDrills ?? [], cat);
+                          if (!picked) return;
+                          // Single-player-in-this-sport-group — no real
+                          // choice of who it's for, so assign it directly
+                          // and just confirm what happened (there's no
+                          // picker modal to show it in).
+                          if (groupCards.length === 1) {
+                            handleToggleSelection(groupCards[0].player.id, picked.id, false);
+                            Alert.alert(
+                              'Added',
+                              `"${picked.name}" added to ${groupCards[0].player.display_name}'s drills.`
+                            );
+                          } else {
+                            setQuickStartPickerFor({ drill: picked, sport });
+                          }
+                        }}
+                      >
+                        <Text style={styles.chipText}>{cat}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </>
         );
       })() : null}
 
@@ -1030,13 +1068,14 @@ export default function HomeScreen() {
                 <Text style={styles.focusLabel}>Suggested focus this offseason</Text>
                 {focusSuggestion ? (
                   <Text style={styles.focusBody}>
-                    {focusSuggestion.category} was your lowest shooting % last season ({focusSuggestion.pct}%,{' '}
+                    {focusSuggestion.category} was your lowest make rate last season (
+                    {formatShootingPct(focusSuggestion.makes, focusSuggestion.attempts, player.sport)},{' '}
                     {focusSuggestion.makes}/{focusSuggestion.attempts}). Worth extra reps there.
                   </Text>
                 ) : (
                   <Text style={styles.focusBody}>
-                    Not enough shooting data from a prior season yet — this shows up once you've
-                    completed a full in-season with at least 5 shots logged in one category.
+                    Not enough data from a prior season yet — this shows up once you've
+                    completed a full in-season with at least 5 attempts logged in one category.
                   </Text>
                 )}
                 {conditioningFocusSuggestion ? (
@@ -1227,20 +1266,22 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add "{quickStartPickerFor?.name}" for…</Text>
+            <Text style={styles.modalTitle}>Add "{quickStartPickerFor?.drill.name}" for…</Text>
             <ScrollView style={{ maxHeight: 400 }}>
-              {cards.map((c) => {
+              {cards
+                .filter((c) => c.player.sport === quickStartPickerFor?.sport)
+                .map((c) => {
                 if (!quickStartPickerFor) return null;
-                const selected = c.drills.some((cd) => !cd.assigned && cd.id === quickStartPickerFor.id);
+                const selected = c.drills.some((cd) => !cd.assigned && cd.id === quickStartPickerFor.drill.id);
                 return (
                   <Pressable
                     key={c.player.id}
                     style={styles.pickerDrillRow}
-                    onPress={() => handleToggleSelection(c.player.id, quickStartPickerFor.id, selected)}
-                    disabled={pendingSelectionId === quickStartPickerFor.id}
+                    onPress={() => handleToggleSelection(c.player.id, quickStartPickerFor.drill.id, selected)}
+                    disabled={pendingSelectionId === quickStartPickerFor.drill.id}
                   >
                     <Text style={[styles.drillName, { flex: 1 }]}>{c.player.display_name}</Text>
-                    {pendingSelectionId === quickStartPickerFor.id ? (
+                    {pendingSelectionId === quickStartPickerFor.drill.id ? (
                       <ActivityIndicator color={colors.primary} size="small" />
                     ) : (
                       <Text style={selected ? styles.checkDone : styles.checkPending}>
@@ -1637,7 +1678,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  drillRowText: { flex: 1, marginRight: 12 },
+  // minWidth: 0 is the real fix — a real bug Jay caught on-device
+  // (2026-09-10): a tracks_time conditioning drill marked done adds 2
+  // more icon buttons (📊 ↩️) plus a longer result string ("· 5 reps ·
+  // 40s" vs. a short makes/attempts result) than this row was ever tested
+  // with. Without minWidth: 0, a flex:1 child can't shrink below its own
+  // content's natural width when the row overflows — Yoga's default
+  // behaves like web's `min-width: auto` — so the whole name/category
+  // column collapsed to a sliver and wrapped letter-by-letter into a
+  // huge, mostly-empty box instead of just wrapping normally onto 2 lines.
+  drillRowText: { flex: 1, marginRight: 12, minWidth: 0 },
   pickerDrillRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1648,9 +1698,13 @@ const styles = StyleSheet.create({
   },
   drillName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  checkPending: { color: colors.primary, fontSize: 13, fontWeight: '600' },
-  checkDone: { color: colors.successDark, fontSize: 13, fontWeight: '700' },
-  iconButton: { paddingLeft: 8 },
+  // flexShrink: 0 on both — the done/pending label and the icon buttons
+  // should always render at full size; the name/category column (above)
+  // is the one that gives up space when the row is tight, and now does
+  // so by wrapping normally instead of collapsing.
+  checkPending: { color: colors.primary, fontSize: 13, fontWeight: '600', flexShrink: 0 },
+  checkDone: { color: colors.successDark, fontSize: 13, fontWeight: '700', flexShrink: 0 },
+  iconButton: { paddingLeft: 8, flexShrink: 0 },
   iconButtonText: { fontSize: 20 },
   challengesSection: { gap: 8 },
   challengeRow: {
@@ -1664,7 +1718,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  challengeText: { fontSize: 14, fontWeight: '600', color: colors.text, flexShrink: 1 },
+  // minWidth: 0 — same real bug class as drillRowText above (2026-09-10),
+  // reported on Android specifically: "X challenged you!" plus the
+  // Decline/Accept buttons in one row, on a narrower/Android layout,
+  // could collapse this text into a tall sliver instead of shrinking
+  // normally, inflating challengeRow's height and leaving the buttons
+  // looking stranded in a huge mostly-empty box.
+  challengeText: { fontSize: 14, fontWeight: '600', color: colors.text, flexShrink: 1, minWidth: 0 },
   challengeSubtext: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
   challengeCancel: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
   challengeButton: {
@@ -1712,7 +1772,13 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.background,
   },
-  modalButtonRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  // flexShrink: 0 added 2026-09-10 alongside the challengeText fix above —
+  // safe everywhere this is used (a full-width block inside a column-
+  // layout modal card doesn't care about flexShrink), and specifically
+  // needed where it sits beside challengeText in challengeRow's row
+  // layout, so the buttons hold their size and challengeText is the one
+  // that shrinks/wraps.
+  modalButtonRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexShrink: 0 },
   smallButton: {
     flex: 1,
     backgroundColor: colors.primary,

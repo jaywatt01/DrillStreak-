@@ -10,6 +10,7 @@ import {
   computeMakesAttemptsTotal,
   computeRepTallies,
   computeShootingBreakdown,
+  formatShootingPct,
   getCompletionDates,
   getCompletionHistory,
   getPlayerNotes,
@@ -165,7 +166,7 @@ export default function CoachPlayerStatsModal({ playerId, playerName, playerSpor
                       {freeThrows.makes}/{freeThrows.attempts}
                     </Text>
                     <Text style={styles.shootingPercent}>
-                      {Math.round((freeThrows.makes / freeThrows.attempts) * 100)}%
+                      {formatShootingPct(freeThrows.makes, freeThrows.attempts, playerSport)}
                     </Text>
                   </View>
                 </Pressable>
@@ -182,7 +183,7 @@ export default function CoachPlayerStatsModal({ playerId, playerName, playerSpor
                       {shooting.makes}/{shooting.attempts}
                     </Text>
                     <Text style={styles.shootingPercent}>
-                      {Math.round((shooting.makes / shooting.attempts) * 100)}%
+                      {formatShootingPct(shooting.makes, shooting.attempts, playerSport)}
                     </Text>
                   </View>
                 </Pressable>

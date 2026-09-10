@@ -23,6 +23,7 @@ import {
   DEFAULT_DRILL_MINUTES,
   deleteDrill,
   deletePlayer,
+  formatShootingPct,
   getMyCustomDrills,
   listMyPlayers,
   Player,
@@ -248,11 +249,12 @@ export default function AddPlayerScreen() {
                 // just closed" is actually true, not a separate screen
                 // someone has to remember to go check.
                 const summary = await summarizeSeason(playerId, result.closedSeason.id);
+                const playerSport = players.find((p) => p.id === playerId)?.sport ?? 'basketball';
                 const shootingLine = summary.shooting
-                  ? `Shooting: ${summary.shooting.makes}/${summary.shooting.attempts} (${Math.round((summary.shooting.makes / summary.shooting.attempts) * 100)}%)\n`
+                  ? `Shooting: ${summary.shooting.makes}/${summary.shooting.attempts} (${formatShootingPct(summary.shooting.makes, summary.shooting.attempts, playerSport)})\n`
                   : '';
                 const ftLine = summary.freeThrows
-                  ? `Free throws: ${summary.freeThrows.makes}/${summary.freeThrows.attempts} (${Math.round((summary.freeThrows.makes / summary.freeThrows.attempts) * 100)}%)\n`
+                  ? `Free throws: ${summary.freeThrows.makes}/${summary.freeThrows.attempts} (${formatShootingPct(summary.freeThrows.makes, summary.freeThrows.attempts, playerSport)})\n`
                   : '';
                 Alert.alert(
                   `${result.closedSeason.label} — recap`,

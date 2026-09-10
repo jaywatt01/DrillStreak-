@@ -12,6 +12,7 @@ import {
   computeRepTallies,
   computeShootingBreakdown,
   formatPlayerBio,
+  formatShootingPct,
   getCompletionDates,
   getCompletionHistory,
   getPlayerNotes,
@@ -288,7 +289,7 @@ export default function ProgressScreen() {
                     {freeThrows.makes}/{freeThrows.attempts}
                   </Text>
                   <Text style={styles.shootingPercent}>
-                    {Math.round((freeThrows.makes / freeThrows.attempts) * 100)}%
+                    {formatShootingPct(freeThrows.makes, freeThrows.attempts, player.sport)}
                   </Text>
                 </View>
               </Pressable>
@@ -309,7 +310,7 @@ export default function ProgressScreen() {
                     {shooting.makes}/{shooting.attempts}
                   </Text>
                   <Text style={styles.shootingPercent}>
-                    {Math.round((shooting.makes / shooting.attempts) * 100)}%
+                    {formatShootingPct(shooting.makes, shooting.attempts, player.sport)}
                   </Text>
                 </View>
               </Pressable>
@@ -505,7 +506,11 @@ export default function ProgressScreen() {
                         {seasonDetail.summary.shooting.makes}/{seasonDetail.summary.shooting.attempts}
                       </Text>
                       <Text style={styles.shootingPercent}>
-                        {Math.round((seasonDetail.summary.shooting.makes / seasonDetail.summary.shooting.attempts) * 100)}%
+                        {formatShootingPct(
+                          seasonDetail.summary.shooting.makes,
+                          seasonDetail.summary.shooting.attempts,
+                          seasonDetail.sport
+                        )}
                       </Text>
                     </View>
                   </View>

@@ -37,6 +37,22 @@ export const AVAILABLE_SPORTS = [
   { value: 'softball', label: 'Softball', comingSoon: false },
 ] as const;
 
+// Real convention gap Jay caught on-device: a makes/attempts rate reads
+// as a plain percentage in basketball ("72%") but as a 3-decimal average
+// with no leading zero in baseball/softball (".720", or "1.000" for a
+// perfect rate — real batting-average formatting, not this app's
+// invention). One shared formatter so every screen that shows a
+// makes/attempts rate (Progress, CoachPlayerStatsModal, the season-recap
+// share text) stays consistent instead of drifting per call site.
+export function formatShootingPct(makes: number, attempts: number, sport: string): string {
+  const pct = makes / attempts;
+  if (sport === 'baseball' || sport === 'softball') {
+    const formatted = pct.toFixed(3);
+    return pct >= 1 ? formatted : formatted.slice(1);
+  }
+  return `${Math.round(pct * 100)}%`;
+}
+
 // Joins whichever bio fields are actually set into one line — e.g.
 // "Point Guard · 6'2" · 165 lbs · Class of 2027". Skips anything blank
 // rather than showing an empty placeholder, and returns null (render
