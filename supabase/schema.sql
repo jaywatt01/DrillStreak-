@@ -810,6 +810,15 @@ create policy player_notes_player_read on player_notes
 -- without exposing the teams table to broad SELECT. Runs as security
 -- definer so it can look up the team by code, but re-checks the caller
 -- actually owns/guards the player being added before inserting.
+--
+-- Sport match check added 2026-09-10, Jay's explicit ask after the
+-- baseball/softball build: nothing previously stopped a player from
+-- joining a team of a different sport via invite code — each sport is
+-- its own separate entity, enforced generically here (a plain column
+-- comparison, not hardcoded to any sport name) so it holds for any future
+-- sport with zero further changes. Message uses the player's display_name,
+-- not their raw id — caught before shipping, a first draft interpolated
+-- the uuid directly, which would have shown a real parent a raw id string.
 -- ---------------------------------------------------------------------------
 create or replace function redeem_team_invite(p_invite_code text, p_player_id uuid)
 returns team_memberships
@@ -819,6 +828,7 @@ set search_path = public
 as $$
 declare
   v_team teams;
+  v_player players;
   v_result team_memberships;
 begin
   select * into v_team from teams where invite_code = p_invite_code;
@@ -826,13 +836,19 @@ begin
     raise exception 'Invalid invite code';
   end if;
 
-  if not exists (
-    select 1 from players p
-    where p.id = p_player_id
-      and (p.created_by_user_id = auth.uid()
-        or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()))
-  ) then
+  select p.* into v_player
+  from players p
+  where p.id = p_player_id
+    and (p.created_by_user_id = auth.uid()
+      or exists (select 1 from guardianships g where g.player_id = p.id and g.guardian_user_id = auth.uid()));
+
+  if v_player.id is null then
     raise exception 'Not authorized for this player';
+  end if;
+
+  if v_player.sport <> v_team.sport then
+    raise exception 'This invite code is for a % team — % is set up for %.',
+      v_team.sport, v_player.display_name, v_player.sport;
   end if;
 
   insert into team_memberships (team_id, player_id)
