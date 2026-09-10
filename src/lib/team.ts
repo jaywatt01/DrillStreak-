@@ -42,6 +42,7 @@ export type RosterCompletion = {
   playerId: string;
   playerName: string;
   drillName: string;
+  drillId: string;
 };
 
 export async function getMyTeam(): Promise<Team | null> {
@@ -340,7 +341,7 @@ export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): P
 
   const { data, error } = await supabase
     .from('completions')
-    .select('id, date, player_id, players(display_name), drills(name)')
+    .select('id, date, player_id, drill_id, players(display_name), drills(name)')
     .in('player_id', rosterPlayerIds)
     .gte('date', mondayOfThisWeek())
     .order('date', { ascending: false });
@@ -357,6 +358,7 @@ export async function getRosterCompletionsThisWeek(rosterPlayerIds: string[]): P
         playerId: row.player_id as string,
         playerName: player.display_name as string,
         drillName: drill.name as string,
+        drillId: row.drill_id as string,
       };
     })
     .filter((c): c is RosterCompletion => c != null);

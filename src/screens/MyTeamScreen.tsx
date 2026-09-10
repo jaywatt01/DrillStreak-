@@ -797,8 +797,18 @@ export default function MyTeamScreen() {
             ) : (
               assignedDrills.map((a) => {
                 const scheduleLabel = formatScheduleLabel(a.scheduledTime, a.durationMinutes);
+                // Real gap Jay caught on-device: an assignment stayed
+                // listed here with no sign a player had actually done it —
+                // only checkable via the separate "Roster activity"
+                // section below. Only meaningful for a player-targeted
+                // assignment (a.playerId set) — a whole-team assignment
+                // has no single completed/not state, different players
+                // finish on different days, so that case is left as-is.
+                const completedByTarget =
+                  a.playerId != null &&
+                  rosterCompletions.some((c) => c.playerId === a.playerId && c.drillId === a.id);
                 return (
-                  <View key={a.assignmentId} style={styles.drillRow}>
+                  <View key={a.assignmentId} style={[styles.drillRow, completedByTarget && styles.drillRowDone]}>
                     <Pressable style={styles.drillRowMain} onPress={() => openScheduler(a)}>
                       <View style={styles.drillRowText}>
                         <Text style={styles.drillName}>{a.name}</Text>
@@ -807,6 +817,7 @@ export default function MyTeamScreen() {
                           {scheduleLabel ? ` · ⏰ ${scheduleLabel}` : ' · ⏰ Set suggested time'}
                         </Text>
                       </View>
+                      {completedByTarget ? <Text style={styles.checkDone}>✓ Done</Text> : null}
                     </Pressable>
                     <Pressable
                       onPress={() => handleUnassign(a.assignmentId)}
@@ -1415,16 +1426,23 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     backgroundColor: '#FFF8EA',
   },
+  // Added 2026-09-10 for the "assignment completed by its target player"
+  // indicator — same green-done treatment as Home's drill rows.
+  drillRowDone: {
+    borderColor: colors.success,
+    backgroundColor: '#EAF7EE',
+  },
   drillRowMain: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  drillRowText: { flex: 1, marginRight: 12 },
+  drillRowText: { flex: 1, marginRight: 12, minWidth: 0 },
   drillName: { fontSize: 15, fontWeight: '600', color: colors.text },
   drillCategory: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   assignTag: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   assignedTag: { color: colors.accentDark, fontSize: 13, fontWeight: '700' },
+  checkDone: { color: colors.successDark, fontSize: 13, fontWeight: '700', flexShrink: 0 },
   scheduleLink: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   modalOverlay: {
     flex: 1,
