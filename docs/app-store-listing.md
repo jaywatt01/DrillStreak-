@@ -6,44 +6,53 @@ Everything below is ready to paste into App Store Connect except screenshots (ne
 DrillStreak
 
 ## Standing tagline (added Sep 5, 2026 — use everywhere going forward)
-**"Start the streak that changes your game."** — Jay's explicit call: this is now the tagline for all DrillStreak materials and marketing, not just the marketing site (where it was already live at the bottom of the page and is what prompted this). Use it as the lead line anywhere there's room — promotional text, feature graphics, social, future ads. **Doesn't fit Apple's 30-char Subtitle field verbatim** (it's ~40 characters) — Subtitle stays the shorter, mechanic-descriptive "Assign drills. Track streaks." for that one specific constrained field; the new tagline is the brand-voice line everywhere else.
+**"Start the streak that changes your game."** — Jay's explicit call: this is now the tagline for all DrillStreak materials and marketing, not just the marketing site (where it was already live at the bottom of the page and is what prompted this). Use it as the closing line anywhere there's room — promotional text, feature graphics, social, future ads.
+
+## Campaign line (added Sep 10, 2026 — the expanded pitch, pairs with the tagline above)
+**"One app for all the sports that a family plays and enjoys. One app that helps the whole family improve their game, no matter the game that's being played. Start the streak that changes your game."** — Jay's own words, verbatim. Use the first two sentences as the expanded/long-form pitch (social captions, longer ad copy, the marketing site) with the standing tagline as the close, exactly as written here.
 
 ## Subtitle (30 char max)
-Assign drills. Track streaks.
+One app. Every sport.
+
+**Changed Sep 10, 2026** from "Assign drills. Track streaks." — that line described the mechanic, not the actual selling point. Baseball and softball are live alongside basketball now, with volleyball/soccer next and more after that — multi-sport-family is the headline positioning going forward (see WHO IT'S FOR below), so the one field every App Store search result shows should say that, not a feature description.
 
 ## Category
 Primary: Health & Fitness
 Secondary: Sports
 
 ## Promotional text (170 char max, editable anytime without review)
-Start the streak that changes your game. Every rep, verified — a real record of the work that gets athletes noticed. Free for coaches, forever.
+One app for every sport your family plays. DrillStreak turns daily reps into visible progress — streaks, badges, real growth. Free for coaches, forever.
 
-## Description (growth-tracking bullets added Sep 10, 2026 — see WHAT IT DOES below)
-Every extra rep is a step toward something — a starting spot, a scholarship look, a coach who notices. DrillStreak turns that work into a verified, dated record instead of a guess.
+## Description (rewritten Sep 10, 2026 — multi-sport-family positioning, growth-only voice)
+DrillStreak is the one training app for a family playing more than one sport, or a program running more than one team — every kid, every sport, growing in the same place instead of juggling a separate app per kid.
 
-A coach creates a team and assigns drills to the roster each week. Players (or a parent, for younger athletes) log what they actually did — and everyone can see the consistency streak build. No more guessing whether the extra work is really getting done.
+A coach creates a team and assigns drills to the roster each week. Players (or a parent, for younger athletes) log what they did, and everyone gets to watch the progress build — a streak, a badge, a season better than the last.
 
 WHAT IT DOES
-- Coaches: create a team, share an invite code, assign this week's drills, see your roster's real activity — all free, forever.
+- One app for every sport your family plays — basketball, baseball, and softball live now, more sports on the way. Switch between them without losing a single rep of history.
+- Coaches: create a team, share an invite code, assign this week's drills, see your roster's activity — all free, forever.
 - Players & parents: log completed drills in seconds, build a streak, add any drill to your calendar with your own time and duration.
-- Track real growth over time, not just a streak count: shooting percentages by drill category, conditioning reps and times together (so "faster" and "stronger" are actual numbers, not a feeling), and a season-by-season history to look back on.
+- Track real growth over time: shooting/hitting percentages by drill category, conditioning reps and times together (so "faster" and "stronger" are actual numbers, not a feeling), and a season-by-season history to look back on.
 - Offseason mode swaps the daily streak for a weekly goal and a suggested focus area — built from the player's own numbers, not a generic tip.
-- Pick from a built-in drill library or create your own custom drills — nothing is locked to one sport.
 - One account can be both a coach and a parent at the same time.
 
 WHO IT'S FOR
-Any coach or self-motivated athlete who wants real accountability instead of a self-reported "yeah I did it." Built by a coach, for the exact problem of not knowing what actually happened at home. Reviewed and used by NBA-level player-development coaching staff.
+Families with a kid — or a few kids — playing one sport or several, and coaches who want their whole roster growing in one place. Built by a coach, for the feeling of watching a player actually get better. Reviewed and used by NBA-level player-development coaching staff.
 
 FREE VS. PARENT MEMBERSHIP
 - Free: this week's activity, one linked player, unlimited custom drills, every coach feature at no cost.
-- Parent membership ($4.99/month): full progress history and unlimited linked players.
+- Parent membership ($4.99/month): full progress history and unlimited linked players — across every sport your family plays, no extra cost per kid or per sport.
 
 Coach features are free permanently — they always will be.
+
+**Real correction, Sep 10, 2026 — this section previously carried the exact framing Jay had already rejected once (Aug 2, 2026, and again on `/for-schools`, Aug 30): "real accountability instead of a self-reported 'yeah I did it,'" "the exact problem of not knowing what actually happened at home," "verified, dated record instead of a guess," "no more guessing whether the extra work is really getting done."** That's surveillance/oversight framing, not the growth/confidence feeling this app is actually built to give a player. This repo's own `DRILLSTREAK.md` (Aug 2 entry, and the standing voice rule near the sport-switcher work) already documents this exact correction — should have been checked there before this section was ever written this way the first time, not caught by Jay after the fact a third time. Rewritten above; if this section gets touched again, check it against `DRILLSTREAK.md`'s voice rule and the live marketing site's actual copy first.
 
 **Note on the credibility line above (added August 14, 2026):** kept deliberately un-named. The specific coach (Chris Hines, Minnesota Timberwolves) gave this feedback as a personal friend on a private call, not as a public endorsement — using his name in App Store copy without asking him first would be a real overstep, both as a courtesy and because his name carries an implied team/league affiliation he hasn't agreed to lend. Ask him directly before ever naming him here; the generic phrasing above is the safe version to ship in the meantime.
 
 ## Keywords (100 char max, comma-separated, no spaces after commas)
-basketball,training,drills,coach,streak,progress,accountability,youth sports,workout,team,roster
+basketball,baseball,softball,training,drills,coach,streak,family,team,roster,youth sports
+
+**Changed Sep 10, 2026** (89/100 chars) — added baseball/softball now that they're real, and dropped "accountability" (the exact framing being corrected above, shouldn't be in the App Store search index either) and "workout" (generic, lower-value than naming the two new live sports).
 
 ## Support URL
 https://legal.drillstreak.com/support.html (lists support@drillstreak.com as the support contact)
