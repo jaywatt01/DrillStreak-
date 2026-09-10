@@ -156,7 +156,7 @@ export default function MyTeamScreen() {
       if (myTeam) {
         const [rosterData, drills, assigned] = await Promise.all([
           getRoster(myTeam.id),
-          getAvailableDrills(),
+          getAvailableDrills(myTeam.sport),
           getWeeklyTeamAssignments(myTeam.id),
         ]);
         setRoster(rosterData);

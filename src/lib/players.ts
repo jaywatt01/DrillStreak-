@@ -27,11 +27,14 @@ export const PLAYER_SELECT_COLUMNS =
 // nothing) — this list is just what the UI currently offers a picker for,
 // not a database constraint. Add a sport here once its default drill
 // library has been drafted and reviewed, same discipline as the original
-// basketball drill-library expansion.
+// basketball drill-library expansion. Baseball (30 drills: 7 hitting/7
+// pitching/11 fielding/5 conditioning) and softball (32: same but 9
+// pitching, covering the windmill-specific arm-care drills) both seeded
+// 2026-09-10 — see DRILLSTREAK.md.
 export const AVAILABLE_SPORTS = [
   { value: 'basketball', label: 'Basketball', comingSoon: false },
-  { value: 'baseball', label: 'Baseball', comingSoon: true },
-  { value: 'softball', label: 'Softball', comingSoon: true },
+  { value: 'baseball', label: 'Baseball', comingSoon: false },
+  { value: 'softball', label: 'Softball', comingSoon: false },
 ] as const;
 
 // Joins whichever bio fields are actually set into one line — e.g.
