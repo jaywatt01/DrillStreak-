@@ -20,7 +20,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { colors } from '../theme/colors';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import WeekDotsRow from '../components/WeekDotsRow';
-import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
+import { AVAILABLE_SPORTS, DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
 import {
   assignDrillToPlayer,
   assignDrillToTeam,
@@ -89,6 +89,7 @@ export default function MyTeamScreen() {
   const [assignedDrills, setAssignedDrills] = useState<AssignedDrill[]>([]);
   const [rosterCompletions, setRosterCompletions] = useState<RosterCompletion[]>([]);
   const [teamName, setTeamName] = useState('');
+  const [newTeamSport, setNewTeamSport] = useState<string>('basketball');
   const [creating, setCreating] = useState(false);
   const [togglingDrillId, setTogglingDrillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -238,8 +239,9 @@ export default function MyTeamScreen() {
     setCreating(true);
     setError(null);
     try {
-      await createTeam(teamName.trim());
+      await createTeam(teamName.trim(), newTeamSport);
       setTeamName('');
+      setNewTeamSport('basketball');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create team.');
@@ -603,6 +605,24 @@ export default function MyTeamScreen() {
             value={teamName}
             onChangeText={setTeamName}
           />
+          <View style={styles.chipRow}>
+            {AVAILABLE_SPORTS.map((sport) => (
+              <Pressable
+                key={sport.value}
+                style={[
+                  styles.chip,
+                  newTeamSport === sport.value && styles.chipSelected,
+                  sport.comingSoon && styles.chipDisabled,
+                ]}
+                onPress={() => !sport.comingSoon && setNewTeamSport(sport.value)}
+                disabled={sport.comingSoon}
+              >
+                <Text style={[styles.chipText, newTeamSport === sport.value && styles.chipTextSelected]}>
+                  {sport.label}{sport.comingSoon ? ' (Soon)' : ''}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <Pressable
             style={[styles.button, (!teamName.trim() || creating) && styles.buttonDisabled]}
             onPress={handleCreateTeam}
@@ -1335,6 +1355,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipDisabled: { opacity: 0.4 },
   chipText: { fontSize: 13, color: colors.text, fontWeight: '600' },
   chipTextSelected: { color: '#FFFFFF' },
   drillRow: {

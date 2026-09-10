@@ -60,7 +60,16 @@ create table players (
   -- Growth strategy section, but this is closer to "more detail within an
   -- existing relationship" than a new comparison surface — a family can
   -- still flip it off per player.
-  stats_visible_to_team boolean not null default true
+  stats_visible_to_team boolean not null default true,
+  -- Added 2026-09-10, first step toward baseball/softball support: which
+  -- sport this player's profile is for. Free text, not an enum, same
+  -- reasoning as position above — a future sport shouldn't need another
+  -- migration to add, just a value. Set once at creation (AddPlayerScreen)
+  -- like is_account_holder; not editable after the fact for now, since
+  -- nothing downstream (default drill library, Quick Start categories)
+  -- reads it for a mid-life sport change yet. Defaults to 'basketball' —
+  -- the only sport with real content today.
+  sport text not null default 'basketball'
 );
 
 -- guardianships: lets a second account (e.g. the other parent) access a
@@ -109,7 +118,11 @@ create table teams (
   -- test only) — always set a real date matching the purchased term for
   -- a genuine paid plan.
   institutional_plan text check (institutional_plan in ('team', 'program')),
-  institutional_plan_expires_at timestamptz
+  institutional_plan_expires_at timestamptz,
+  -- Added 2026-09-10, same as players.sport above: which sport this
+  -- roster is for. Free text, set once at team creation (My Team's
+  -- "create a team" flow), defaults to 'basketball'.
+  sport text not null default 'basketball'
 );
 
 -- Real security gap caught before this shipped, not after: teams_coach_access
@@ -220,7 +233,16 @@ create table drills (
   -- completions.duration_seconds, both optional) instead of makes/
   -- attempts — same "two numbers together" shape shooting's makes/
   -- attempts already has, so conditioning growth is just as visible.
-  tracks_time boolean not null default false
+  tracks_time boolean not null default false,
+  -- Added 2026-09-10, same field/reasoning as players.sport and
+  -- teams.sport: which sport this drill belongs to. Free text, defaults
+  -- to 'basketball' (every existing drill, default or custom, really is
+  -- basketball as of this migration). Lets the default library and any
+  -- future "browse drills" screen filter to a player's own sport instead
+  -- of mixing every sport's drills together once a second one has real
+  -- content. A custom drill inherits the sport of the player it's created
+  -- for at creation time (see createCustomDrill in lib/players.ts).
+  sport text not null default 'basketball'
 );
 
 -- ---------------------------------------------------------------------------

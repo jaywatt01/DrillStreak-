@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
 import { listMyTeams, listTeamContacts } from '../lib/teamMessages';
-import { listMyPlayers, Player } from '../lib/players';
+import { AVAILABLE_SPORTS, listMyPlayers, Player } from '../lib/players';
 import { listBadges, Badge, filterCurrentBadges } from '../lib/badges';
 import { getActiveSeason } from '../lib/seasons';
 import BadgeLegend from '../components/BadgeLegend';
@@ -212,7 +212,12 @@ export default function AccountScreen() {
             players.map((p) => (
               <Pressable key={p.id} style={styles.badgeRosterRow} onPress={() => setViewingBadgesFor(p)}>
                 <View style={styles.badgeRosterTopRow}>
-                  <Text style={styles.badgeRosterName}>{p.display_name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={styles.badgeRosterName}>{p.display_name}</Text>
+                    <Text style={styles.sportTag}>
+                      {AVAILABLE_SPORTS.find((s) => s.value === p.sport)?.label ?? p.sport}
+                    </Text>
+                  </View>
                   <Text style={styles.badgeRosterLink}>View →</Text>
                 </View>
                 <BadgeIconStrip
@@ -410,6 +415,18 @@ const styles = StyleSheet.create({
   },
   badgeRosterTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   badgeRosterName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  sportTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
   badgeRosterLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   badgeModalOverlay: {
     flex: 1,

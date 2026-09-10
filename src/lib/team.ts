@@ -8,6 +8,7 @@ export type Team = {
   name: string;
   invite_code: string;
   prompt_for_results: boolean;
+  sport: string;
 };
 
 export type RosterPlayer = {
@@ -50,7 +51,7 @@ export async function getMyTeam(): Promise<Team | null> {
 
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, invite_code, prompt_for_results')
+    .select('id, name, invite_code, prompt_for_results, sport')
     .eq('coach_user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
@@ -59,15 +60,15 @@ export async function getMyTeam(): Promise<Team | null> {
   return data as Team | null;
 }
 
-export async function createTeam(name: string): Promise<Team> {
+export async function createTeam(name: string, sport: string = 'basketball'): Promise<Team> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
 
   const { data, error } = await supabase
     .from('teams')
-    .insert({ name, coach_user_id: userId })
-    .select('id, name, invite_code, prompt_for_results')
+    .insert({ name, coach_user_id: userId, sport })
+    .select('id, name, invite_code, prompt_for_results, sport')
     .single();
   if (error) throw error;
   return data as Team;

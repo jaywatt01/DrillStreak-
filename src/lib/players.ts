@@ -15,10 +15,24 @@ export type Player = {
   grad_year: number | null;
   position: string | null;
   stats_visible_to_team: boolean;
+  sport: string;
 };
 
 export const PLAYER_SELECT_COLUMNS =
-  'id, display_name, height, weight, grad_year, position, stats_visible_to_team';
+  'id, display_name, height, weight, grad_year, position, stats_visible_to_team, sport';
+
+// The sports with a real default drill library today vs. ones shown as a
+// future option in the Add a Player / Create a Team pickers. Free text
+// under the hood (players.sport / teams.sport / drills.sport all reject
+// nothing) — this list is just what the UI currently offers a picker for,
+// not a database constraint. Add a sport here once its default drill
+// library has been drafted and reviewed, same discipline as the original
+// basketball drill-library expansion.
+export const AVAILABLE_SPORTS = [
+  { value: 'basketball', label: 'Basketball', comingSoon: false },
+  { value: 'baseball', label: 'Baseball', comingSoon: true },
+  { value: 'softball', label: 'Softball', comingSoon: true },
+] as const;
 
 // Joins whichever bio fields are actually set into one line — e.g.
 // "Point Guard · 6'2" · 165 lbs · Class of 2027". Skips anything blank
@@ -26,7 +40,9 @@ export const PLAYER_SELECT_COLUMNS =
 // nothing) if none of the four fields are filled in yet. Shared between
 // Progress and Home so both screens read the exact same formatting —
 // moved here from ProgressScreen.tsx rather than duplicated a second time.
-export function formatPlayerBio(player: Player): string | null {
+export function formatPlayerBio(
+  player: Pick<Player, 'position' | 'height' | 'weight' | 'grad_year'>
+): string | null {
   const parts = [
     player.position,
     player.height,
@@ -182,14 +198,23 @@ export async function listMyPlayers(): Promise<Player[]> {
 // themselves) — false when it's a kid this account is managing. Drives
 // the Team Chat restriction in schema.sql's is_player_restricted(); see
 // the comment on players.is_account_holder for the full reasoning.
-export async function addPlayer(displayName: string, isAccountHolder: boolean): Promise<Player> {
+export async function addPlayer(
+  displayName: string,
+  isAccountHolder: boolean,
+  sport: string = 'basketball'
+): Promise<Player> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error('Not signed in');
 
   const { data, error } = await supabase
     .from('players')
-    .insert({ display_name: displayName, created_by_user_id: userId, is_account_holder: isAccountHolder })
+    .insert({
+      display_name: displayName,
+      created_by_user_id: userId,
+      is_account_holder: isAccountHolder,
+      sport,
+    })
     .select(PLAYER_SELECT_COLUMNS)
     .single();
   if (error) throw error;
@@ -267,7 +292,8 @@ export async function addCustomDrill(
   category: string,
   playerId: string,
   estimatedMinutes: number | null,
-  videoUrl: string | null
+  videoUrl: string | null,
+  sport: string = 'basketball'
 ): Promise<Drill> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
@@ -283,6 +309,7 @@ export async function addCustomDrill(
       is_default: false,
       estimated_minutes: estimatedMinutes,
       video_url: videoUrl,
+      sport,
     })
     .select(DRILL_SELECT_COLUMNS)
     .single();

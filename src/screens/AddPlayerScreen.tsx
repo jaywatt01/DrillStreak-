@@ -18,6 +18,7 @@ import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
   addCustomDrill,
   addPlayer,
+  AVAILABLE_SPORTS,
   CustomDrill,
   DEFAULT_DRILL_MINUTES,
   deleteDrill,
@@ -51,6 +52,10 @@ export default function AddPlayerScreen() {
   // gets the Team Chat coach-DM-only restriction (schema.sql's
   // is_player_restricted) once this player joins a team.
   const [newPlayerIsMe, setNewPlayerIsMe] = useState(false);
+  // Which default drill library this player gets. Set once here, not
+  // editable after creation yet (see the schema.sql comment on
+  // players.sport) — nothing downstream reads a mid-life sport change.
+  const [newPlayerSport, setNewPlayerSport] = useState<string>('basketball');
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
 
@@ -154,9 +159,10 @@ export default function AddPlayerScreen() {
     setAddingPlayer(true);
     setPlayerError(null);
     try {
-      const player = await addPlayer(newPlayerName.trim(), newPlayerIsMe);
+      const player = await addPlayer(newPlayerName.trim(), newPlayerIsMe, newPlayerSport);
       setNewPlayerName('');
       setNewPlayerIsMe(false);
+      setNewPlayerSport('basketball');
       await load();
       setSelectedPlayerId(player.id);
     } catch (e) {
@@ -371,7 +377,8 @@ export default function AddPlayerScreen() {
         drillCategory.trim(),
         selectedPlayerId,
         estimatedMinutes,
-        drillVideoUrl.trim() || null
+        drillVideoUrl.trim() || null,
+        players.find((p) => p.id === selectedPlayerId)?.sport
       );
       setDrillName('');
       setDrillCategory('');
@@ -662,6 +669,25 @@ export default function AddPlayerScreen() {
           <Text style={[styles.whoChipText, newPlayerIsMe && styles.whoChipTextActive]}>This is me</Text>
         </Pressable>
       </View>
+      <Text style={styles.whoLabel}>What sport?</Text>
+      <View style={styles.whoRow}>
+        {AVAILABLE_SPORTS.map((sport) => (
+          <Pressable
+            key={sport.value}
+            style={[
+              styles.whoChip,
+              newPlayerSport === sport.value && styles.whoChipActive,
+              sport.comingSoon && styles.whoChipDisabled,
+            ]}
+            onPress={() => !sport.comingSoon && setNewPlayerSport(sport.value)}
+            disabled={sport.comingSoon}
+          >
+            <Text style={[styles.whoChipText, newPlayerSport === sport.value && styles.whoChipTextActive]}>
+              {sport.label}{sport.comingSoon ? ' (Soon)' : ''}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       <Pressable
         style={[styles.button, (!newPlayerName.trim() || addingPlayer) && styles.buttonDisabled]}
         onPress={handleAddPlayer}
@@ -857,6 +883,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   whoChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  whoChipDisabled: { opacity: 0.4 },
   whoChipText: { fontSize: 14, fontWeight: '600', color: colors.text },
   whoChipTextActive: { color: '#FFFFFF' },
   input: {
