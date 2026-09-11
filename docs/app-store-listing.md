@@ -23,13 +23,13 @@ Secondary: Sports
 ## Promotional text (170 char max, editable anytime without review)
 One app for every sport your family plays. DrillStreak turns daily reps into visible progress — streaks, badges, real growth. Free for coaches, forever.
 
-## Description (rewritten Sep 10, 2026 — multi-sport-family positioning, growth-only voice)
+## Description (updated Sep 11, 2026 — all 5 launch sports named; multi-sport-family positioning, growth-only voice unchanged)
 DrillStreak is the one training app for a family playing more than one sport, or a program running more than one team — every kid, every sport, growing in the same place instead of juggling a separate app per kid.
 
 A coach creates a team and assigns drills to the roster each week. Players (or a parent, for younger athletes) log what they did, and everyone gets to watch the progress build — a streak, a badge, a season better than the last.
 
 WHAT IT DOES
-- One app for every sport your family plays — basketball, baseball, and softball live now, more sports on the way. Switch between them without losing a single rep of history.
+- One app for every sport your family plays — basketball, baseball, softball, volleyball, and soccer live now, more sports on the way. Switch between them without losing a single rep of history.
 - Coaches: create a team, share an invite code, assign this week's drills, see your roster's activity — all free, forever.
 - Players & parents: log completed drills in seconds, build a streak, add any drill to your calendar with your own time and duration.
 - Track real growth over time: shooting/hitting percentages by drill category, conditioning reps and times together (so "faster" and "stronger" are actual numbers, not a feeling), and a season-by-season history to look back on.
@@ -50,9 +50,9 @@ Coach features are free permanently — they always will be.
 **Note on the credibility line above (added August 14, 2026):** kept deliberately un-named. The specific coach (Chris Hines, Minnesota Timberwolves) gave this feedback as a personal friend on a private call, not as a public endorsement — using his name in App Store copy without asking him first would be a real overstep, both as a courtesy and because his name carries an implied team/league affiliation he hasn't agreed to lend. Ask him directly before ever naming him here; the generic phrasing above is the safe version to ship in the meantime.
 
 ## Keywords (100 char max, comma-separated, no spaces after commas)
-basketball,baseball,softball,training,drills,coach,streak,family,team,roster,youth sports
+basketball,baseball,softball,volleyball,soccer,drills,coach,streak,family,team,roster,youth sports
 
-**Changed Sep 10, 2026** (89/100 chars) — added baseball/softball now that they're real, and dropped "accountability" (the exact framing being corrected above, shouldn't be in the App Store search index either) and "workout" (generic, lower-value than naming the two new live sports).
+**Changed Sep 11, 2026** (98/100 chars) — added volleyball/soccer now that they're real (5 live sports total). Dropped "training" to make room — redundant with "drills," lower search value than naming a live sport. Previous change (Sep 10): added baseball/softball, dropped "accountability" (the exact framing corrected elsewhere in this file, shouldn't be in the App Store search index either) and "workout."
 
 ## Support URL
 https://legal.drillstreak.com/support.html (lists support@drillstreak.com as the support contact)
@@ -74,6 +74,27 @@ Recommend: **4+**, all content descriptors "None" — no violence/mature themes/
 
 ## In-app purchase disclosure
 Parent membership, $4.99/month, auto-renewing subscription. Apple's review guideline 3.1.2 also wants explicit renewal/cancellation text near the purchase button in the app itself — this is a separate, still-open item from the paywall build (see DRILLSTREAK.md Step 7), not something App Store Connect asks for directly.
+
+## App Privacy declarations (App Store Connect's "App Privacy" section) — drafted Sep 11, 2026, never previously done
+The July 26 pass created and saved the listing but this section was never filled in as far as this repo's records show — the app has grown a real amount since then (Team Chat/messaging, push notifications) that a July-era declaration wouldn't cover. Answers below are drafted directly from the real data the app actually collects (cross-checked against `legal/privacy-policy.html` and the Play Store Data Safety answers already given, Sept 5), not guessed. **Sanity-check against Apple's live questionnaire when you're actually in App Store Connect — their exact category wording shifts — same caveat as the age-rating section above.**
+
+For every category below: **linked to your identity** (tied to your account), **used for App Functionality only** — never for third-party advertising or analytics, matching the "no ad networks, no analytics SDKs" line already in the Privacy Policy.
+
+| Apple's category | Collected? | What / why |
+|---|---|---|
+| Contact Info → Email Address | Yes | Sign-in/account identity (Supabase auth) |
+| Identifiers → User ID | Yes | Your Supabase account ID |
+| Identifiers → Device ID | Yes | Expo push token, tied to your device, for push notification delivery |
+| Health & Fitness → Fitness | Yes | Drill completions, streaks, shooting/hitting %, conditioning reps and times |
+| User Content → Other User Content | Yes | Custom drill names, team names, and Team Chat message text |
+| Purchases | Yes | Parent-tier subscription status (via RevenueCat) |
+| Contacts | No | Team rosters use in-app display names, never device contacts |
+| Location | No | — |
+| Browsing/Search History | No | — |
+| Diagnostics | No, unless a crash-reporting SDK gets added later — none exists today | — |
+| Photos or Videos | No | Record-and-review video is saved straight to your device's camera roll and never uploaded — DrillStreak never has custody of it |
+
+**Not an Apple App Privacy data-type category, but worth answering the same questionnaire's permission-usage question accurately:** Calendar — write-only. The app can add an event to your calendar when you tap to schedule a drill; it never reads your existing calendar entries back. Matches the Privacy Policy's existing calendar-permission language exactly.
 
 ---
 
