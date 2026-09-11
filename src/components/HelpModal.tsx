@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 
 type QA = { q: string; a: string };
@@ -8,12 +9,18 @@ type Section = { title: string; items: QA[] };
 // Real ask, 2026-09-11: "the app has a lot of layers and a lot of things
 // it does... people might need help figuring things out." Content below
 // describes real, shipped behavior only — nothing aspirational or
-// planned. Reached from a link on Account (confirmed placement over a
-// dedicated tab or a per-screen "?" icon — this needed the least new
-// navigation surface and doesn't compete with Chat/Players for tab-bar
-// space). Registered as a hidden Tab.Screen in App.tsx
-// (tabBarButton: () => null) rather than introducing a stack navigator
-// just for one screen.
+// planned. Reached from a link on Account.
+//
+// 2026-09-12: rebuilt from a hidden Tab.Screen into a Modal, same
+// pattern as SportSwitcherModal — a real bug Jay caught on-device, not
+// cosmetic: every registered route in a bottom-tab navigator gets an
+// equal flex:1 slot in the bar regardless of what tabBarButton renders
+// inside it (confirmed by reading @react-navigation/bottom-tabs' own
+// source), so the hidden Help tab was silently eating 1/7 of the bar's
+// width for nothing, visibly shifting the 6 real tabs left of center.
+// A Modal never touches the tab bar's route list at all, and gives Help
+// a real Back button for free instead of relying on "just tap another
+// tab," which Jay also asked for explicitly.
 const SECTIONS: Section[] = [
   {
     title: 'Getting Started',
@@ -148,46 +155,66 @@ const SECTIONS: Section[] = [
   },
 ];
 
-export default function HelpScreen() {
+type Props = { visible: boolean; onClose: () => void };
+
+export default function HelpModal({ visible, onClose }: Props) {
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.sectionTitle}>Help & FAQ</Text>
-      <Text style={styles.intro}>
-        Answers to what DrillStreak actually does today. Tap a question to expand it.
-      </Text>
-      {SECTIONS.map((section) => (
-        <View key={section.title} style={styles.section}>
-          <Text style={styles.sectionHeading}>{section.title}</Text>
-          {section.items.map((item) => {
-            const key = `${section.title}:${item.q}`;
-            const open = openKey === key;
-            return (
-              <Pressable
-                key={key}
-                style={styles.item}
-                onPress={() => setOpenKey(open ? null : key)}
-              >
-                <View style={styles.questionRow}>
-                  <Text style={styles.question}>{item.q}</Text>
-                  <Text style={styles.chevron}>{open ? '▲' : '▼'}</Text>
-                </View>
-                {open ? <Text style={styles.answer}>{item.a}</Text> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-      ))}
-      <Text style={styles.footer}>Still stuck? Reach out to support@drillstreak.com.</Text>
-    </ScrollView>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <Pressable onPress={onClose} hitSlop={8} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>Help & FAQ</Text>
+        <View style={styles.backButtonSpacer} />
+      </View>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <Text style={styles.intro}>
+          Answers to what DrillStreak actually does today. Tap a question to expand it.
+        </Text>
+        {SECTIONS.map((section) => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionHeading}>{section.title}</Text>
+            {section.items.map((item) => {
+              const key = `${section.title}:${item.q}`;
+              const open = openKey === key;
+              return (
+                <Pressable key={key} style={styles.item} onPress={() => setOpenKey(open ? null : key)}>
+                  <View style={styles.questionRow}>
+                    <Text style={styles.question}>{item.q}</Text>
+                    <Text style={styles.chevron}>{open ? '▲' : '▼'}</Text>
+                  </View>
+                  {open ? <Text style={styles.answer}>{item.a}</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
+        <Text style={styles.footer}>Still stuck? Reach out to support@drillstreak.com.</Text>
+      </ScrollView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  backButton: { minWidth: 64 },
+  backButtonText: { fontSize: 16, fontWeight: '600', color: colors.primary },
+  backButtonSpacer: { minWidth: 64 },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 20, gap: 16 },
-  sectionTitle: { fontSize: 20, fontWeight: '700', color: colors.text },
   intro: { fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   section: { gap: 8 },
   sectionHeading: {

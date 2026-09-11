@@ -21,7 +21,6 @@ import AddPlayerScreen from './src/screens/AddPlayerScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import TeamBoardScreen from './src/screens/TeamBoardScreen';
 import AccountScreen from './src/screens/AccountScreen';
-import HelpScreen from './src/screens/HelpScreen';
 import { colors } from './src/theme/colors';
 
 const Tab = createBottomTabNavigator();
@@ -221,12 +220,6 @@ function AppTabs() {
         <Tab.Screen name="Progress" component={ProgressScreen} />
         <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
         <Tab.Screen name="Account" component={AccountScreen} />
-        {/* Hidden from the tab bar (tabBarButton renders nothing) — reached
-            only via a link on Account, per Jay's explicit choice over a
-            dedicated tab or a per-screen "?" icon. Still a real, fully
-            navigable route (navigation.navigate('Help')), just not another
-            icon competing for space on an already-6-tab bar. */}
-        <Tab.Screen name="Help" component={HelpScreen} options={{ tabBarButton: () => null }} />
       </Tab.Navigator>
       <SportSwitcherModal />
     </NavigationContainer>
