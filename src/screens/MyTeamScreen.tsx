@@ -1006,8 +1006,8 @@ export default function MyTeamScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.popupCard}>
             <View style={styles.popupHeaderRow}>
-              <Text style={styles.modalTitle}>Roster ({roster.length})</Text>
-              <Pressable onPress={() => setShowRosterModal(false)} hitSlop={8}>
+              <Text style={[styles.modalTitle, styles.popupHeaderTitle]}>Roster ({roster.length})</Text>
+              <Pressable style={styles.popupCloseButton} onPress={() => setShowRosterModal(false)} hitSlop={8}>
                 <Text style={styles.popupCloseText}>Done</Text>
               </Pressable>
             </View>
@@ -1093,8 +1093,8 @@ export default function MyTeamScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.popupCard}>
             <View style={styles.popupHeaderRow}>
-              <Text style={styles.modalTitle}>Roster activity this week</Text>
-              <Pressable onPress={() => setShowActivityModal(false)} hitSlop={8}>
+              <Text style={[styles.modalTitle, styles.popupHeaderTitle]}>Roster activity this week</Text>
+              <Pressable style={styles.popupCloseButton} onPress={() => setShowActivityModal(false)} hitSlop={8}>
                 <Text style={styles.popupCloseText}>Done</Text>
               </Pressable>
             </View>
@@ -1124,8 +1124,8 @@ export default function MyTeamScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.popupCard}>
             <View style={styles.popupHeaderRow}>
-              <Text style={styles.modalTitle}>Assign a drill</Text>
-              <Pressable onPress={() => setBrowsingDrills(false)} hitSlop={8}>
+              <Text style={[styles.modalTitle, styles.popupHeaderTitle]}>Assign a drill</Text>
+              <Pressable style={styles.popupCloseButton} onPress={() => setBrowsingDrills(false)} hitSlop={8}>
                 <Text style={styles.popupCloseText}>Cancel</Text>
               </Pressable>
             </View>
@@ -1224,8 +1224,8 @@ export default function MyTeamScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.popupCard}>
             <View style={styles.popupHeaderRow}>
-              <Text style={styles.modalTitle}>{pickingTargetFor?.name}</Text>
-              <Pressable onPress={() => setPickingTargetFor(null)} hitSlop={8}>
+              <Text style={[styles.modalTitle, styles.popupHeaderTitle]}>{pickingTargetFor?.name}</Text>
+              <Pressable style={styles.popupCloseButton} onPress={() => setPickingTargetFor(null)} hitSlop={8}>
                 <Text style={styles.popupCloseText}>Cancel</Text>
               </Pressable>
             </View>
@@ -1507,6 +1507,16 @@ const styles = StyleSheet.create({
     maxHeight: '85%',
   },
   popupHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  // Real bug found and fixed 2026-09-12: a long drill/player name as
+  // this row's title (e.g. "Shuttle sprints simulating defensive
+  // transitions") had no minWidth: 0/flex to let it wrap within its own
+  // share of the row, so it grew unbounded and pushed the Cancel/Done
+  // button on this same row half off the card — same bug class already
+  // fixed once on Home's drill rows (see drillRowText's own comment),
+  // just never applied here since these titles are short and static
+  // everywhere except this one dynamic-name modal.
+  popupHeaderTitle: { flex: 1, minWidth: 0, marginRight: 12 },
+  popupCloseButton: { flexShrink: 0 },
   popupCloseText: { fontSize: 14, fontWeight: '600', color: colors.primary },
   // Real bug found Sept 6, 2026 on Jay's re-test: no flex meant this
   // ScrollView just grew to fit its content instead of shrinking inside
