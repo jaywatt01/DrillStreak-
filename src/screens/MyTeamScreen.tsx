@@ -711,8 +711,7 @@ export default function MyTeamScreen() {
             <Text style={styles.invitePlaceholder}>
               Tap 📋 to copy just the code, or 📤 to share the full invite message. Share this
               with every player and parent on your roster — the more of them who join, the more
-              accountability data you see on your own roster activity feed below, at no cost to
-              you.
+              of the team's progress you get to see and celebrate together, at no cost to you.
             </Text>
           </View>
 
