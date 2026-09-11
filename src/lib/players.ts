@@ -98,6 +98,20 @@ export function isPositionFirstSport(sport: string): boolean {
   return POSITION_FIRST_SPORTS.has(sport);
 }
 
+// Real gap Jay caught on-device 2026-09-12: the Assign-a-drill picker's
+// two chip rows (primary, secondary) sat with no label distinguishing
+// them, reading as one undifferentiated cluster of chips — and the
+// picker's own instructional text still said "Pick a category, then a
+// drill" even for soccer, where position is what you actually pick
+// first. These two labels drive both the row headers and that copy.
+export function primaryFilterFieldLabel(sport: string): 'Position' | 'Category' {
+  return isPositionFirstSport(sport) ? 'Position' : 'Category';
+}
+
+export function secondaryFilterFieldLabel(sport: string): 'Position' | 'Category' {
+  return isPositionFirstSport(sport) ? 'Category' : 'Position';
+}
+
 // Synthetic bucket, not a stored value: represents every drill in a
 // position-first sport with no position_group set (soccer's "Decision
 // Making" and "All Positions — Core Fundamentals" content — genuinely

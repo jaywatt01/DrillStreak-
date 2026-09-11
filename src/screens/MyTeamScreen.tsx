@@ -28,7 +28,9 @@ import {
   matchesPrimaryDrillFilter,
   matchesSecondaryDrillFilter,
   primaryDrillFilterOptions,
+  primaryFilterFieldLabel,
   secondaryDrillFilterOptions,
+  secondaryFilterFieldLabel,
 } from '../lib/players';
 import { useActiveSport } from '../lib/ActiveSportContext';
 import {
@@ -1127,26 +1129,31 @@ export default function MyTeamScreen() {
                 <Text style={styles.popupCloseText}>Cancel</Text>
               </Pressable>
             </View>
-            <Text style={styles.placeholder}>Pick a category, then a drill, then choose who it's for.</Text>
+            <Text style={styles.placeholder}>
+              Pick a {primaryFilterFieldLabel(activeSport).toLowerCase()}, then a drill, then choose who it's for.
+            </Text>
             {(() => {
               const primaryOptions = primaryDrillFilterOptions(availableDrills, activeSport);
               if (primaryOptions.length === 0) return null;
               return (
-                <View style={styles.chipRow}>
-                  {primaryOptions.map((opt) => (
-                    <Pressable
-                      key={opt}
-                      style={[styles.chip, drillCategoryFilter === opt && styles.chipSelected]}
-                      onPress={() => {
-                        setDrillCategoryFilter(opt);
-                        setDrillPositionFilter(null);
-                      }}
-                    >
-                      <Text style={[styles.chipText, drillCategoryFilter === opt && styles.chipTextSelected]}>
-                        {formatFilterLabel(opt)}
-                      </Text>
-                    </Pressable>
-                  ))}
+                <View>
+                  <Text style={styles.modalLabel}>{primaryFilterFieldLabel(activeSport)}</Text>
+                  <View style={styles.chipRow}>
+                    {primaryOptions.map((opt) => (
+                      <Pressable
+                        key={opt}
+                        style={[styles.chip, drillCategoryFilter === opt && styles.chipSelected]}
+                        onPress={() => {
+                          setDrillCategoryFilter(opt);
+                          setDrillPositionFilter(null);
+                        }}
+                      >
+                        <Text style={[styles.chipText, drillCategoryFilter === opt && styles.chipTextSelected]}>
+                          {formatFilterLabel(opt)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               );
             })()}
@@ -1157,23 +1164,28 @@ export default function MyTeamScreen() {
               );
               if (secondaryOptions.length === 0) return null;
               return (
-                <View style={styles.chipRow}>
-                  {secondaryOptions.map((opt) => (
-                    <Pressable
-                      key={opt}
-                      style={[styles.chip, drillPositionFilter === opt && styles.chipSelected]}
-                      onPress={() => setDrillPositionFilter(drillPositionFilter === opt ? null : opt)}
-                    >
-                      <Text style={[styles.chipText, drillPositionFilter === opt && styles.chipTextSelected]}>
-                        {formatFilterLabel(opt)}
-                      </Text>
-                    </Pressable>
-                  ))}
+                <View>
+                  <Text style={styles.modalLabel}>{secondaryFilterFieldLabel(activeSport)}</Text>
+                  <View style={styles.chipRow}>
+                    {secondaryOptions.map((opt) => (
+                      <Pressable
+                        key={opt}
+                        style={[styles.chip, drillPositionFilter === opt && styles.chipSelected]}
+                        onPress={() => setDrillPositionFilter(drillPositionFilter === opt ? null : opt)}
+                      >
+                        <Text style={[styles.chipText, drillPositionFilter === opt && styles.chipTextSelected]}>
+                          {formatFilterLabel(opt)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               );
             })()}
             {drillCategoryFilter == null ? (
-              <Text style={styles.placeholder}>Pick a category above to see its drills.</Text>
+              <Text style={styles.placeholder}>
+                Pick a {primaryFilterFieldLabel(activeSport).toLowerCase()} above to see its drills.
+              </Text>
             ) : (
               <ScrollView style={styles.popupScroll}>
                 {availableDrills
