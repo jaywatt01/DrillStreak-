@@ -21,7 +21,15 @@ import { colors } from '../theme/colors';
 import CoachPlayerStatsModal from '../components/CoachPlayerStatsModal';
 import SportSwitcher from '../components/SportSwitcher';
 import WeekDotsRow from '../components/WeekDotsRow';
-import { DEFAULT_DRILL_MINUTES, Drill } from '../lib/players';
+import {
+  DEFAULT_DRILL_MINUTES,
+  Drill,
+  formatFilterLabel,
+  matchesPrimaryDrillFilter,
+  matchesSecondaryDrillFilter,
+  primaryDrillFilterOptions,
+  secondaryDrillFilterOptions,
+} from '../lib/players';
 import { useActiveSport } from '../lib/ActiveSportContext';
 import {
   assignDrillToPlayer,
@@ -1121,23 +1129,21 @@ export default function MyTeamScreen() {
             </View>
             <Text style={styles.placeholder}>Pick a category, then a drill, then choose who it's for.</Text>
             {(() => {
-              const categories = Array.from(
-                new Set(availableDrills.map((d) => d.category).filter((c): c is string => !!c))
-              ).sort();
-              if (categories.length === 0) return null;
+              const primaryOptions = primaryDrillFilterOptions(availableDrills, activeSport);
+              if (primaryOptions.length === 0) return null;
               return (
                 <View style={styles.chipRow}>
-                  {categories.map((cat) => (
+                  {primaryOptions.map((opt) => (
                     <Pressable
-                      key={cat}
-                      style={[styles.chip, drillCategoryFilter === cat && styles.chipSelected]}
+                      key={opt}
+                      style={[styles.chip, drillCategoryFilter === opt && styles.chipSelected]}
                       onPress={() => {
-                        setDrillCategoryFilter(cat);
+                        setDrillCategoryFilter(opt);
                         setDrillPositionFilter(null);
                       }}
                     >
-                      <Text style={[styles.chipText, drillCategoryFilter === cat && styles.chipTextSelected]}>
-                        {cat}
+                      <Text style={[styles.chipText, drillCategoryFilter === opt && styles.chipTextSelected]}>
+                        {formatFilterLabel(opt)}
                       </Text>
                     </Pressable>
                   ))}
@@ -1145,25 +1151,21 @@ export default function MyTeamScreen() {
               );
             })()}
             {drillCategoryFilter != null && (() => {
-              const positionGroups = Array.from(
-                new Set(
-                  availableDrills
-                    .filter((d) => d.category === drillCategoryFilter)
-                    .map((d) => d.positionGroup)
-                    .filter((p): p is string => !!p)
-                )
-              ).sort();
-              if (positionGroups.length === 0) return null;
+              const secondaryOptions = secondaryDrillFilterOptions(
+                availableDrills.filter((d) => matchesPrimaryDrillFilter(d, activeSport, drillCategoryFilter as string)),
+                activeSport
+              );
+              if (secondaryOptions.length === 0) return null;
               return (
                 <View style={styles.chipRow}>
-                  {positionGroups.map((pos) => (
+                  {secondaryOptions.map((opt) => (
                     <Pressable
-                      key={pos}
-                      style={[styles.chip, drillPositionFilter === pos && styles.chipSelected]}
-                      onPress={() => setDrillPositionFilter(drillPositionFilter === pos ? null : pos)}
+                      key={opt}
+                      style={[styles.chip, drillPositionFilter === opt && styles.chipSelected]}
+                      onPress={() => setDrillPositionFilter(drillPositionFilter === opt ? null : opt)}
                     >
-                      <Text style={[styles.chipText, drillPositionFilter === pos && styles.chipTextSelected]}>
-                        {pos}
+                      <Text style={[styles.chipText, drillPositionFilter === opt && styles.chipTextSelected]}>
+                        {formatFilterLabel(opt)}
                       </Text>
                     </Pressable>
                   ))}
@@ -1177,15 +1179,17 @@ export default function MyTeamScreen() {
                 {availableDrills
                   .filter(
                     (drill) =>
-                      drill.category === drillCategoryFilter &&
-                      (drillPositionFilter == null || drill.positionGroup === drillPositionFilter)
+                      matchesPrimaryDrillFilter(drill, activeSport, drillCategoryFilter as string) &&
+                      matchesSecondaryDrillFilter(drill, activeSport, drillPositionFilter)
                   )
                   .map((drill) => (
                     <Pressable key={drill.id} style={styles.drillRow} onPress={() => openTargetPicker(drill)}>
                       <View style={styles.drillRowMain}>
                         <View style={styles.drillRowText}>
                           <Text style={styles.drillName}>{drill.name}</Text>
-                          {drill.category ? <Text style={styles.drillCategory}>{drill.category}</Text> : null}
+                          {drill.category ? (
+                            <Text style={styles.drillCategory}>{formatFilterLabel(drill.category)}</Text>
+                          ) : null}
                         </View>
                         <Text style={styles.assignTag}>Assign →</Text>
                       </View>

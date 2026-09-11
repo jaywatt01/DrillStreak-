@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../theme/colors';
-import { Drill } from '../lib/players';
+import { Drill, formatFilterLabel } from '../lib/players';
 import {
   createWorkoutTemplate,
   deleteWorkoutTemplate,
@@ -140,7 +140,7 @@ export default function WorkoutBuilderModal({ playerId, availableDrills, onClose
                   >
                     <View style={styles.rowText}>
                       <Text style={styles.rowName}>{drill.name}</Text>
-                      {drill.category ? <Text style={styles.rowBio}>{drill.category}</Text> : null}
+                      {drill.category ? <Text style={styles.rowBio}>{formatFilterLabel(drill.category)}</Text> : null}
                     </View>
                     <Text style={selected ? styles.checkSelected : styles.checkUnselected}>
                       {selected ? '✓' : '+'}

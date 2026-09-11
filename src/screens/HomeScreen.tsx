@@ -26,11 +26,13 @@ import { useActiveSport } from '../lib/ActiveSportContext';
 import SportSwitcher from '../components/SportSwitcher';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
 import {
+  ALL_POSITIONS_LABEL,
   calculateStreak,
   DEFAULT_DRILL_MINUTES,
   deleteCompletion,
   Drill,
   DrillResult,
+  formatFilterLabel,
   formatPlayerBio,
   formatShootingPct,
   getCompletionDates,
@@ -39,7 +41,11 @@ import {
   listMyPlayers,
   logCompletion,
   logDrillResult,
+  matchesPrimaryDrillFilter,
+  matchesSecondaryDrillFilter,
   Player,
+  primaryDrillFilterOptions,
+  secondaryDrillFilterOptions,
   wasStreakGraceUsed,
   WeeklyDrill,
 } from '../lib/players';
@@ -96,6 +102,11 @@ type PlayerCardData = {
   promptForResults: boolean;
   challenges: Challenge[];
   categories: string[];
+  // The "What to work on today" row's top-level chip options — category
+  // for most sports, position (plus the synthetic all-positions bucket)
+  // for a position-first sport like soccer. Kept separate from
+  // `categories` above, which Quick Start still always uses as-is.
+  primaryDrillOptions: string[];
   allDrills: Drill[];
   workoutTemplates: WorkoutTemplate[];
   badges: Badge[];
@@ -409,6 +420,7 @@ export default function HomeScreen() {
               .map((c) => awardChallengeWonBadgeIfNeeded(player.id, c.id))
           );
           const badges = await listBadges(player.id);
+          const primaryDrillOptions = primaryDrillFilterOptions(allDrills, player.sport);
 
           return {
             player,
@@ -423,6 +435,7 @@ export default function HomeScreen() {
             promptForResults,
             challenges,
             categories,
+            primaryDrillOptions,
             allDrills,
             workoutTemplates,
             badges,
@@ -840,7 +853,9 @@ export default function HomeScreen() {
             <Text style={styles.drillName}>{drill.name}</Text>
             {drill.category || drill.assigned ? (
               <Text style={styles.drillCategory}>
-                {[drill.category, drill.assigned ? 'Assigned' : null].filter(Boolean).join(' · ')}
+                {[drill.category ? formatFilterLabel(drill.category) : null, drill.assigned ? 'Assigned' : null]
+                  .filter(Boolean)
+                  .join(' · ')}
               </Text>
             ) : null}
           </View>
@@ -952,7 +967,7 @@ export default function HomeScreen() {
                     }
                   }}
                 >
-                  <Text style={styles.chipText}>{cat}</Text>
+                  <Text style={styles.chipText}>{formatFilterLabel(cat)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -988,7 +1003,7 @@ export default function HomeScreen() {
             completedToday,
             promptForResults,
             challenges,
-            categories,
+            primaryDrillOptions,
             allDrills,
             workoutTemplates,
             badges,
@@ -1053,7 +1068,7 @@ export default function HomeScreen() {
                 <Text style={styles.focusLabel}>Suggested focus this offseason</Text>
                 {focusSuggestion ? (
                   <Text style={styles.focusBody}>
-                    {focusSuggestion.category} was your lowest make rate last season (
+                    {formatFilterLabel(focusSuggestion.category)} was your lowest make rate last season (
                     {formatShootingPct(focusSuggestion.makes, focusSuggestion.attempts, player.sport)},{' '}
                     {focusSuggestion.makes}/{focusSuggestion.attempts}). Worth extra reps there.
                   </Text>
@@ -1203,7 +1218,7 @@ export default function HomeScreen() {
 
             <Text style={styles.sectionTitle}>What to work on today</Text>
             <View style={styles.chipRow}>
-              {categories.map((cat) => (
+              {primaryDrillOptions.map((cat) => (
                 <Pressable
                   key={cat}
                   style={[
@@ -1221,7 +1236,7 @@ export default function HomeScreen() {
                       categoryPickerFor?.playerId === player.id && categoryPickerFor.category === cat && styles.chipTextSelected,
                     ]}
                   >
-                    {cat}
+                    {formatFilterLabel(cat)}
                   </Text>
                 </Pressable>
               ))}
@@ -1312,25 +1327,25 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{categoryPickerFor?.category}</Text>
+            <Text style={styles.modalTitle}>{categoryPickerFor ? formatFilterLabel(categoryPickerFor.category) : ''}</Text>
             {(() => {
               const card = cards.find((c) => c.player.id === categoryPickerFor?.playerId);
               if (!card || !categoryPickerFor) return null;
-              const allInCategory = card.allDrills.filter((d) => d.category === categoryPickerFor.category);
-              const positionGroups = Array.from(
-                new Set(allInCategory.map((d) => d.positionGroup).filter((p): p is string => !!p))
-              ).sort();
-              if (positionGroups.length === 0) return null;
+              const allInPrimary = card.allDrills.filter((d) =>
+                matchesPrimaryDrillFilter(d, card.player.sport, categoryPickerFor.category)
+              );
+              const secondaryOptions = secondaryDrillFilterOptions(allInPrimary, card.player.sport);
+              if (secondaryOptions.length === 0) return null;
               return (
                 <View style={[styles.chipRow, { marginBottom: 10 }]}>
-                  {positionGroups.map((pos) => (
+                  {secondaryOptions.map((opt) => (
                     <Pressable
-                      key={pos}
-                      style={[styles.chip, categoryPositionFilter === pos && styles.chipSelected]}
-                      onPress={() => setCategoryPositionFilter(categoryPositionFilter === pos ? null : pos)}
+                      key={opt}
+                      style={[styles.chip, categoryPositionFilter === opt && styles.chipSelected]}
+                      onPress={() => setCategoryPositionFilter(categoryPositionFilter === opt ? null : opt)}
                     >
-                      <Text style={[styles.chipText, categoryPositionFilter === pos && styles.chipTextSelected]}>
-                        {pos}
+                      <Text style={[styles.chipText, categoryPositionFilter === opt && styles.chipTextSelected]}>
+                        {formatFilterLabel(opt)}
                       </Text>
                     </Pressable>
                   ))}
@@ -1343,8 +1358,8 @@ export default function HomeScreen() {
                 if (!card || !categoryPickerFor) return null;
                 const categoryDrills = card.allDrills.filter(
                   (d) =>
-                    d.category === categoryPickerFor.category &&
-                    (categoryPositionFilter == null || d.positionGroup === categoryPositionFilter)
+                    matchesPrimaryDrillFilter(d, card.player.sport, categoryPickerFor.category) &&
+                    matchesSecondaryDrillFilter(d, card.player.sport, categoryPositionFilter)
                 );
                 const selectedIds = new Set(card.drills.filter((d) => !d.assigned).map((d) => d.id));
                 if (categoryDrills.length === 0) {

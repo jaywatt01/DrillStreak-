@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
 import { listMyTeams, listTeamContacts } from '../lib/teamMessages';
+import { getPlayerTeams } from '../lib/team';
 import { AVAILABLE_SPORTS, listMyPlayers, Player } from '../lib/players';
 import { listBadges, Badge, filterCurrentBadges } from '../lib/badges';
 import { getActiveSeason } from '../lib/seasons';
@@ -60,6 +61,16 @@ export default function AccountScreen() {
   // while it's empty, per Jay's explicit ask not to show this section
   // "all of the time."
   const [institutionalTeams, setInstitutionalTeams] = useState<InstitutionalTeam[]>([]);
+  // Real ask, 2026-09-11: a parent with kids across 2-3 sports shouldn't
+  // have to toggle the sport switcher just to see who plays what.
+  // Deliberately unfiltered (every sport at once) — the one exception to
+  // this whole screen's active-sport scoping, and the one place in the
+  // app that's supposed to be. Badges/streaks/season deliberately left
+  // off, per Jay's own call — this is just "who, what sport, what team,"
+  // nothing that needs a season or a streak number attached.
+  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
+  const [teamNamesByPlayer, setTeamNamesByPlayer] = useState<Record<string, string[]>>({});
+  const [loadingAllPlayers, setLoadingAllPlayers] = useState(true);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
@@ -69,6 +80,25 @@ export default function AccountScreen() {
     listMyInstitutionalTeams()
       .then(setInstitutionalTeams)
       .catch(() => setInstitutionalTeams([]));
+    listMyPlayers()
+      .then(async (all) => {
+        setAllPlayers(all);
+        // Per-player try/catch — one player's team lookup failing (a rare
+        // RLS/network hiccup) shouldn't blank out every other player's
+        // team name too; that player just shows no team line instead.
+        const entries = await Promise.all(
+          all.map(async (p) => {
+            try {
+              const teams = await getPlayerTeams(p.id);
+              return [p.id, teams.map((t) => t.name)] as const;
+            } catch {
+              return [p.id, []] as const;
+            }
+          })
+        );
+        setTeamNamesByPlayer(Object.fromEntries(entries));
+      })
+      .finally(() => setLoadingAllPlayers(false));
   }, []);
 
   // Separate effect, depends on activeSport/sportLoading (2026-09-10) —
@@ -211,9 +241,36 @@ export default function AccountScreen() {
         )}
       </View>
 
+      {allPlayers.length > 0 ? (
+        <View style={styles.badgesSection}>
+          <Text style={styles.tierLabel}>Your Players</Text>
+          <Text style={styles.tierBody}>
+            Every player linked to your account, across every sport you're using.
+          </Text>
+          {loadingAllPlayers ? (
+            <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
+          ) : (
+            allPlayers.map((p) => (
+              <View key={p.id} style={styles.badgeRosterRow}>
+                <View style={styles.badgeRosterTopRow}>
+                  <Text style={styles.badgeRosterName}>{p.display_name}</Text>
+                  <Text style={styles.sportTag}>
+                    {AVAILABLE_SPORTS.find((s) => s.value === p.sport)?.label ?? p.sport}
+                  </Text>
+                </View>
+                {teamNamesByPlayer[p.id]?.length ? (
+                  <Text style={styles.rosterTeamName}>{teamNamesByPlayer[p.id].join(', ')}</Text>
+                ) : null}
+              </View>
+            ))
+          )}
+        </View>
+      ) : null}
+
       {players.length > 0 ? (
         <View style={styles.badgesSection}>
           <Text style={styles.tierLabel}>Badges</Text>
+          <Text style={styles.tierBody}>For your currently active sport only — switch sports above to see another.</Text>
           {loadingBadges ? (
             <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
           ) : (
@@ -444,6 +501,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   badgeRosterLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
+  rosterTeamName: { fontSize: 12, color: colors.textMuted },
   badgeModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',

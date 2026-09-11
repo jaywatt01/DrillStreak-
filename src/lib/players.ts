@@ -65,6 +65,80 @@ export function getSportIcon(sport: string): string {
   return SPORT_ICON[sport] ?? SPORT_ICON_FALLBACK;
 }
 
+// Category strings are stored lowercase (matches how they're compared/
+// filtered everywhere — this never touches the stored value, display
+// only). Position/serve-type strings are already Title Case at seed
+// time, so running them through this too is a safe no-op — one shared
+// formatter for every filter chip's label instead of category chips
+// being the one lowercase holdout next to every other chip in the app
+// (Jay caught this on-device, 2026-09-11).
+export function formatFilterLabel(value: string): string {
+  return value.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Soccer (and football, once it ships) has more drill categories than
+// player positions — 8 categories vs. 4 positions for soccer, the
+// reverse of baseball's/volleyball's shape (fewer categories than
+// positions, or close to even). Showing every category as the
+// always-visible top-level chip (Home's "What to work on today" row,
+// repeated once per player card) gets noisy fast as a roster grows —
+// Jay's real ask, 2026-09-11: flip which filter is primary for sports
+// where that actually helps, not a blanket change to the model
+// everywhere else. Per-sport, not global.
+const POSITION_FIRST_SPORTS = new Set(['soccer']);
+
+export function isPositionFirstSport(sport: string): boolean {
+  return POSITION_FIRST_SPORTS.has(sport);
+}
+
+// Synthetic bucket, not a stored value: represents every drill in a
+// position-first sport with no position_group set (soccer's "Decision
+// Making" and "All Positions — Core Fundamentals" content — genuinely
+// position-agnostic by design, not an oversight). Without this bucket
+// there'd be no way to reach roughly a third of soccer's library once
+// position becomes the mandatory first choice instead of category.
+export const ALL_POSITIONS_LABEL = 'All Positions';
+
+type FilterableDrill = { category: string | null; positionGroup: string | null };
+
+// The always-visible top-level chip options for a sport's drill picker —
+// categories normally, positions (plus the synthetic all-positions
+// bucket) for a position-first sport. Sourced from the player's already-
+// loaded drill list, not a separate query.
+export function primaryDrillFilterOptions(drills: FilterableDrill[], sport: string): string[] {
+  if (!isPositionFirstSport(sport)) {
+    return Array.from(new Set(drills.map((d) => d.category).filter((v): v is string => !!v))).sort();
+  }
+  return Array.from(new Set(drills.map((d) => d.positionGroup ?? ALL_POSITIONS_LABEL))).sort();
+}
+
+// The secondary chip options once a primary value is picked — the
+// opposite field from whichever one is primary for this sport.
+export function secondaryDrillFilterOptions(drills: FilterableDrill[], sport: string): string[] {
+  return Array.from(
+    new Set(
+      drills
+        .map((d) => (isPositionFirstSport(sport) ? d.category : d.positionGroup))
+        .filter((v): v is string => !!v)
+    )
+  ).sort();
+}
+
+export function matchesPrimaryDrillFilter(drill: FilterableDrill, sport: string, primaryValue: string): boolean {
+  if (!isPositionFirstSport(sport)) return drill.category === primaryValue;
+  if (primaryValue === ALL_POSITIONS_LABEL) return drill.positionGroup == null;
+  return drill.positionGroup === primaryValue;
+}
+
+export function matchesSecondaryDrillFilter(
+  drill: FilterableDrill,
+  sport: string,
+  secondaryValue: string | null
+): boolean {
+  if (secondaryValue == null) return true;
+  return isPositionFirstSport(sport) ? drill.category === secondaryValue : drill.positionGroup === secondaryValue;
+}
+
 // Real convention gap Jay caught on-device: a makes/attempts rate reads
 // as a plain percentage in basketball ("72%") but as a 3-decimal average
 // with no leading zero in baseball/softball (".720", or "1.000" for a
