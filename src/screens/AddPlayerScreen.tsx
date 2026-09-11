@@ -31,6 +31,7 @@ import {
 } from '../lib/players';
 import { useActiveSport } from '../lib/ActiveSportContext';
 import SportSwitcher from '../components/SportSwitcher';
+import ActionSheet, { ActionSheetOption } from '../components/ActionSheet';
 import { joinTeamByInviteCode } from '../lib/team';
 import { defaultLabel, getActiveSeason, renameSeason, Season, startInSeason, startOffseason, summarizeSeason, undoSeasonSwitch } from '../lib/seasons';
 
@@ -311,49 +312,57 @@ export default function AddPlayerScreen() {
     );
   };
 
-  const handleLongPressPlayer = (player: Player) => {
-    Alert.alert(player.display_name, 'What would you like to do?', [
-      {
-        text: 'Edit Profile',
-        onPress: () => {
-          setRenamingPlayerId(player.id);
-          setRenamePlayerText(player.display_name);
-          setEditHeight(player.height ?? '');
-          setEditWeight(player.weight ?? '');
-          setEditGradYear(player.grad_year != null ? String(player.grad_year) : '');
-          setEditPosition(player.position ?? '');
-          setEditStatsVisible(player.stats_visible_to_team);
-        },
+  // Real bug, same root cause as Account's new player menu, fixed the
+  // same day: this is also a 4-option menu (Edit Profile/Season/Delete/
+  // Cancel) — Alert.alert silently drops the 4th button on Android.
+  // Never specifically reported broken here, but certain to hit the
+  // same wall, so fixed alongside it rather than left for a future
+  // report. Routed through the same ActionSheet component.
+  const [playerActionSheetFor, setPlayerActionSheetFor] = useState<Player | null>(null);
+
+  const handleLongPressPlayer = (player: Player) => setPlayerActionSheetFor(player);
+
+  const playerActionSheetOptions = (player: Player): ActionSheetOption[] => [
+    {
+      text: 'Edit Profile',
+      onPress: () => {
+        setRenamingPlayerId(player.id);
+        setRenamePlayerText(player.display_name);
+        setEditHeight(player.height ?? '');
+        setEditWeight(player.weight ?? '');
+        setEditGradYear(player.grad_year != null ? String(player.grad_year) : '');
+        setEditPosition(player.position ?? '');
+        setEditStatsVisible(player.stats_visible_to_team);
       },
-      { text: 'Season', onPress: () => openSeasonEditor(player) },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert(
-            `Delete ${player.display_name}?`,
-            'This removes their profile and all their logged history. This can\'t be undone.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  try {
-                    await deletePlayer(player.id);
-                    await load();
-                  } catch (e) {
-                    setPlayerError(e instanceof Error ? e.message : 'Failed to delete player.');
-                  }
-                },
+    },
+    { text: 'Season', onPress: () => openSeasonEditor(player) },
+    {
+      text: 'Delete',
+      style: 'destructive',
+      onPress: () => {
+        Alert.alert(
+          `Delete ${player.display_name}?`,
+          'This removes their profile and all their logged history. This can\'t be undone.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await deletePlayer(player.id);
+                  await load();
+                } catch (e) {
+                  setPlayerError(e instanceof Error ? e.message : 'Failed to delete player.');
+                }
               },
-            ]
-          );
-        },
+            },
+          ]
+        );
       },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
+    },
+    { text: 'Cancel', style: 'cancel' },
+  ];
 
   const handleSaveProfileEdit = async () => {
     if (!renamingPlayerId || !renamePlayerText.trim()) return;
@@ -491,6 +500,7 @@ export default function AddPlayerScreen() {
   }
 
   return (
+    <>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -866,6 +876,14 @@ export default function AddPlayerScreen() {
         )}
       </Pressable>
     </ScrollView>
+    <ActionSheet
+      visible={playerActionSheetFor != null}
+      title={playerActionSheetFor?.display_name ?? ''}
+      message="What would you like to do?"
+      options={playerActionSheetFor ? playerActionSheetOptions(playerActionSheetFor) : []}
+      onClose={() => setPlayerActionSheetFor(null)}
+    />
+    </>
   );
 }
 
