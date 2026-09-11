@@ -1,15 +1,17 @@
 // notify-team-message: fans a new team_messages/team_events row, or a
 // team_memberships join/leave, out to the right devices via Expo's push
-// API. NOT deployed by pushing this repo — Supabase Edge Functions are
-// their own deploy target. See DRILLSTREAK.md for the manual steps:
-// redeploy this function (`supabase functions deploy notify-team-message`,
-// or paste it into the Dashboard's Edge Functions editor) — team_messages/
-// team_events already call it via pg_net triggers in schema.sql, and
-// team_memberships' own triggers (added 2026-09-11, notify_team_roster_
-// webhook) point at this exact same function URL, so no new Database
-// Webhook wiring is needed, just the redeploy. Also requires an Apple
-// Push key in Jay's Apple Developer account before iOS delivery actually
-// works — see DRILLSTREAK.md.
+// API. Deployed directly via the Supabase MCP connector's deploy tool
+// (2026-09-11) — earlier versions of this comment describing a manual
+// `supabase functions deploy`/Dashboard-paste step were wrong; that tool
+// exists and works from this environment, no manual step needed. Pushing
+// this repo still doesn't deploy it, though — the deploy tool has to be
+// invoked separately whenever this file changes. team_messages/
+// team_events call it via pg_net triggers in schema.sql, and
+// team_memberships' own triggers (notify_team_roster_webhook) point at
+// this exact same function URL, so no separate Database Webhook wiring
+// was ever needed. Still requires an Apple Push key in Jay's Apple
+// Developer account before iOS delivery actually works — see
+// DRILLSTREAK.md.
 //
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected into every
 // Edge Function's environment by Supabase — nothing to configure for
