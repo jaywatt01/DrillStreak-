@@ -46,6 +46,7 @@ import {
   Player,
   primaryDrillFilterOptions,
   secondaryDrillFilterOptions,
+  secondaryFilterFieldLabel,
   wasStreakGraceUsed,
   WeeklyDrill,
 } from '../lib/players';
@@ -1337,18 +1338,21 @@ export default function HomeScreen() {
               const secondaryOptions = secondaryDrillFilterOptions(allInPrimary, card.player.sport);
               if (secondaryOptions.length === 0) return null;
               return (
-                <View style={[styles.chipRow, { marginBottom: 10 }]}>
-                  {secondaryOptions.map((opt) => (
-                    <Pressable
-                      key={opt}
-                      style={[styles.chip, categoryPositionFilter === opt && styles.chipSelected]}
-                      onPress={() => setCategoryPositionFilter(categoryPositionFilter === opt ? null : opt)}
-                    >
-                      <Text style={[styles.chipText, categoryPositionFilter === opt && styles.chipTextSelected]}>
-                        {formatFilterLabel(opt)}
-                      </Text>
-                    </Pressable>
-                  ))}
+                <View style={{ marginBottom: 10 }}>
+                  <Text style={styles.modalLabel}>{secondaryFilterFieldLabel(card.player.sport)}</Text>
+                  <View style={styles.chipRow}>
+                    {secondaryOptions.map((opt) => (
+                      <Pressable
+                        key={opt}
+                        style={[styles.chip, categoryPositionFilter === opt && styles.chipSelected]}
+                        onPress={() => setCategoryPositionFilter(categoryPositionFilter === opt ? null : opt)}
+                      >
+                        <Text style={[styles.chipText, categoryPositionFilter === opt && styles.chipTextSelected]}>
+                          {formatFilterLabel(opt)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               );
             })()}
