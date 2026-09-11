@@ -344,6 +344,14 @@ export default function AccountScreen() {
         )}
       </View>
 
+      <Pressable
+        style={styles.billingToggle}
+        onPress={() => (navigation.navigate as (name: never) => void)('Help' as never)}
+      >
+        <Text style={styles.billingToggleText}>❓ Help & FAQ</Text>
+        <Text style={styles.billingToggleChevron}>→</Text>
+      </Pressable>
+
       {allPlayers.length > 0 ? (
         <View style={styles.badgesSection}>
           <Text style={styles.tierLabel}>Your Players</Text>
