@@ -24,6 +24,7 @@ import { getActiveSeason } from '../lib/seasons';
 import BadgeLegend from '../components/BadgeLegend';
 import BadgeIconStrip from '../components/BadgeIconStrip';
 import ActionSheet, { ActionSheetOption } from '../components/ActionSheet';
+import HelpModal from '../components/HelpModal';
 import {
   isPurchasesConfigured,
   purchaseParentTier,
@@ -78,6 +79,14 @@ export default function AccountScreen() {
   // (2026-09-11, Jay's ask) — frees up room on the screen for the new
   // player roster and the existing badge section above it.
   const [billingExpanded, setBillingExpanded] = useState(false);
+  // A Modal rather than a navigated screen (2026-09-12, real bug fix —
+  // see HelpModal's own comment): the earlier hidden-tab version silently
+  // ate 1/7 of the tab bar's width for nothing, visibly shifting the 6
+  // real tabs off-center. Local state here since Account is the only
+  // place Help ever opens from — no need for the app-wide context
+  // ActiveSportContext's switcherOpen uses, which has two real trigger
+  // points (the on-screen link and a tab long-press).
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
@@ -351,13 +360,11 @@ export default function AccountScreen() {
         )}
       </View>
 
-      <Pressable
-        style={styles.billingToggle}
-        onPress={() => (navigation.navigate as (name: never) => void)('Help' as never)}
-      >
+      <Pressable style={styles.billingToggle} onPress={() => setHelpOpen(true)}>
         <Text style={styles.billingToggleText}>❓ Help & FAQ</Text>
         <Text style={styles.billingToggleChevron}>→</Text>
       </Pressable>
+      <HelpModal visible={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {allPlayers.length > 0 ? (
         <View style={styles.badgesSection}>
