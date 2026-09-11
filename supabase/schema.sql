@@ -1953,6 +1953,71 @@ create trigger notify_team_events_insert
   for each row
   execute function notify_team_board_webhook();
 
+-- notify_team_roster_webhook: coach notification on a real roster
+-- change, added 2026-09-11. Separate trigger function from the one above
+-- rather than reused as-is, since team_memberships carries no author/
+-- creator column the way team_messages/team_events do (nothing on the
+-- row itself says who deleted it) — auth.uid() is captured explicitly
+-- here instead and passed along as `actor_user_id`. This still works
+-- correctly through nested security-definer calls (redeem_team_invite,
+-- the leave/remove paths) because auth.uid() reads the request's JWT
+-- session context, not the privilege-elevated role SECURITY DEFINER
+-- changes — the real calling user stays visible throughout.
+--
+-- Fires for BOTH directions Jay asked for: a guardian/player leaving
+-- (leaveTeam) or a player being deleted while on a team (cascade delete)
+-- notifies the coach; a guardian redeeming an invite code notifies the
+-- coach too. Deliberately does NOT fire when the actor IS the coach —
+-- the existing coach-initiated removeFromRoster hits this same DELETE
+-- trigger, and a coach doesn't need a push telling them what they just
+-- did themselves. The Edge Function (notify-team-message) does that
+-- comparison, not this trigger — same separation of concerns as the
+-- self-exclusion logic it already has for team_messages' own author.
+create or replace function notify_team_roster_webhook()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  affected_row record;
+  event_type text;
+begin
+  if TG_OP = 'INSERT' then
+    affected_row := NEW;
+    event_type := 'INSERT';
+  else
+    affected_row := OLD;
+    event_type := 'DELETE';
+  end if;
+
+  perform net.http_post(
+    url := 'https://jiohhwahvzajvidbiqnm.supabase.co/functions/v1/notify-team-message',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_69dScqBVzWVq_SLUJQUKNA_cEhBJfnk'
+    ),
+    body := jsonb_build_object(
+      'type', event_type,
+      'table', TG_TABLE_NAME,
+      'record', row_to_json(affected_row),
+      'actor_user_id', auth.uid()
+    )
+  );
+  return affected_row;
+end;
+$$;
+
+create trigger notify_team_memberships_insert
+  after insert on team_memberships
+  for each row
+  execute function notify_team_roster_webhook();
+
+create trigger notify_team_memberships_delete
+  after delete on team_memberships
+  for each row
+  execute function notify_team_roster_webhook();
+
 -- ---------------------------------------------------------------------------
 -- profiles + record_age_attestation: the signup-time age self-attestation
 -- gate (added 2026-08-24, built ahead of Brandon's COPPA-specific legal

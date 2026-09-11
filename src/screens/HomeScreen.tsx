@@ -84,7 +84,7 @@ import {
   listAllDrills,
   listDrillCategories,
   listWorkoutTemplates,
-  pickRandomDrillFromCategory,
+  pickRandomDrillFromPrimary,
   WorkoutTemplate,
 } from '../lib/workouts';
 import { deselectDrillForPlayer, selectDrillForPlayer } from '../lib/drillSelections';
@@ -942,19 +942,19 @@ export default function HomeScreen() {
         // just the currently active sport, so cards can never span more
         // than one sport again — the grouping logic was dead weight the
         // moment that landed. Back to the original single-section version.
-        const categories = cards[0]?.categories ?? [];
-        if (categories.length === 0) return null;
+        const primaryOptions = cards[0]?.primaryDrillOptions ?? [];
+        if (primaryOptions.length === 0) return null;
         return (
           <View style={styles.challengesSection}>
             <Text style={styles.sectionTitle}>Quick Start</Text>
-            <Text style={styles.buildWorkoutHint}>Tap a category for a random drill to assign.</Text>
+            <Text style={styles.buildWorkoutHint}>Tap a chip to assign a random drill.</Text>
             <View style={styles.chipRow}>
-              {categories.map((cat) => (
+              {primaryOptions.map((opt) => (
                 <Pressable
-                  key={cat}
+                  key={opt}
                   style={styles.chip}
                   onPress={() => {
-                    const picked = pickRandomDrillFromCategory(cards[0]?.allDrills ?? [], cat);
+                    const picked = pickRandomDrillFromPrimary(cards[0]?.allDrills ?? [], cards[0].player.sport, opt);
                     if (!picked) return;
                     // Single-player account — no real choice of who it's
                     // for, so assign it directly and just confirm what
@@ -967,7 +967,7 @@ export default function HomeScreen() {
                     }
                   }}
                 >
-                  <Text style={styles.chipText}>{formatFilterLabel(cat)}</Text>
+                  <Text style={styles.chipText}>{formatFilterLabel(opt)}</Text>
                 </Pressable>
               ))}
             </View>

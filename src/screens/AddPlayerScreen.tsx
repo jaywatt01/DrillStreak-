@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useParentEntitlement } from '../lib/purchases';
 import { getInstitutionalAccessByPlayer } from '../lib/institutionalAccess';
@@ -36,6 +36,7 @@ import { defaultLabel, getActiveSeason, renameSeason, Season, startInSeason, sta
 
 export default function AddPlayerScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
   const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const { hasParentTier: hasPurchasedParentTier } = useParentEntitlement();
   const [loading, setLoading] = useState(true);
@@ -129,6 +130,28 @@ export default function AddPlayerScreen() {
       load();
     }, [load])
   );
+
+  // Real ask, 2026-09-11: Account's new "Your Players" section can jump
+  // straight to a player's edit form here instead of duplicating this
+  // whole edit UI (name/height/weight/grad year/position/stats-visible)
+  // a second time on that screen. Reads `players` (the full unfiltered
+  // list, not visiblePlayers) so this works even for a player whose sport
+  // isn't the one currently active. Clears the param via setParams once
+  // consumed, so refocusing this tab later doesn't reopen the modal.
+  useEffect(() => {
+    const params = route.params as { editPlayerId?: string } | undefined;
+    if (!params?.editPlayerId) return;
+    const player = players.find((p) => p.id === params.editPlayerId);
+    if (!player) return;
+    setRenamingPlayerId(player.id);
+    setRenamePlayerText(player.display_name);
+    setEditHeight(player.height ?? '');
+    setEditWeight(player.weight ?? '');
+    setEditGradYear(player.grad_year != null ? String(player.grad_year) : '');
+    setEditPosition(player.position ?? '');
+    setEditStatsVisible(player.stats_visible_to_team);
+    navigation.setParams({ editPlayerId: undefined } as never);
+  }, [route.params, players, navigation]);
 
   const loadCustomDrills = useCallback(async (playerId: string) => {
     try {

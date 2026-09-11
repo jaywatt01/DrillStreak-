@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { createBottomTabNavigator, BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
@@ -11,6 +11,7 @@ import { ActiveSportProvider, useActiveSport } from './src/lib/ActiveSportContex
 import { clearPurchasesUser, configurePurchases, identifyPurchasesUser } from './src/lib/purchases';
 import { registerForPushNotifications } from './src/lib/pushNotifications';
 import { getSportIcon } from './src/lib/players';
+import SportSwitcherModal from './src/components/SportSwitcherModal';
 import AuthScreen from './src/screens/AuthScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -160,7 +161,19 @@ export default function App() {
 // works below ActiveSportProvider in the tree, and App() itself renders
 // the provider rather than sitting inside it.
 function AppTabs() {
-  const { sport } = useActiveSport();
+  const { sport, openSwitcher } = useActiveSport();
+
+  // Real ask, 2026-09-11: Jay's been long-pressing the Drills tab itself,
+  // unconsciously expecting it to open the sport switcher, then catching
+  // himself and going to the on-screen link instead. Wraps the default
+  // tab button rather than replacing its behavior — normal single-tap
+  // navigation still goes through the same `props.onPress` React
+  // Navigation already wires up; this only adds a long-press on top.
+  const drillsTabButton = ({ ref: _ref, ...props }: BottomTabBarButtonProps) => (
+    <Pressable {...props} onLongPress={openSwitcher}>
+      {props.children}
+    </Pressable>
+  );
 
   return (
     <NavigationContainer
@@ -186,7 +199,11 @@ function AppTabs() {
         })}
       >
         <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
-        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Drills' }} />
+        <Tab.Screen
+          name="Home"
+          component={HomeScreen}
+          options={{ title: 'Drills', tabBarButton: drillsTabButton }}
+        />
         <Tab.Screen name="My Team" component={MyTeamScreen} />
         {/* tabBarLabel only, not title — Jay's explicit call: the tab bar
             reads "Players" (was getting cut off), but the screen itself
@@ -196,6 +213,7 @@ function AppTabs() {
         <Tab.Screen name="Team Chat" component={TeamBoardScreen} options={{ tabBarLabel: 'Chat' }} />
         <Tab.Screen name="Account" component={AccountScreen} />
       </Tab.Navigator>
+      <SportSwitcherModal />
     </NavigationContainer>
   );
 }

@@ -11,6 +11,18 @@ type ActiveSportContextValue = {
   sports: SportOption[];
   switchSport: (sport: string) => Promise<void>;
   refreshSports: () => Promise<void>;
+  // Whether the switcher modal is open, lifted up here (2026-09-11)
+  // rather than kept as local state inside SportSwitcher — a long-press
+  // on the Drills tab itself needs to open the same modal regardless of
+  // which screen is currently focused, and the modal is rendered once,
+  // globally, in App.tsx (SportSwitcherModal) rather than once per screen
+  // — six separately-mounted screens each rendering their own <Modal>
+  // would show six stacked modals the moment shared state said "open,"
+  // since RN's Modal renders via a native overlay outside the normal
+  // view tree, unaffected by which tab actually has focus.
+  switcherOpen: boolean;
+  openSwitcher: () => void;
+  closeSwitcher: () => void;
 };
 
 const ActiveSportContext = createContext<ActiveSportContextValue | null>(null);
@@ -25,6 +37,9 @@ export function ActiveSportProvider({ children }: { children: ReactNode }) {
   const [sport, setSport] = useState('basketball');
   const [loading, setLoading] = useState(true);
   const [sports, setSports] = useState<SportOption[]>([]);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const openSwitcher = useCallback(() => setSwitcherOpen(true), []);
+  const closeSwitcher = useCallback(() => setSwitcherOpen(false), []);
 
   const refreshSports = useCallback(async () => {
     setSports(await listSportsForAccount());
@@ -57,7 +72,9 @@ export function ActiveSportProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <ActiveSportContext.Provider value={{ sport, loading, sports, switchSport, refreshSports }}>
+    <ActiveSportContext.Provider
+      value={{ sport, loading, sports, switchSport, refreshSports, switcherOpen, openSwitcher, closeSwitcher }}
+    >
       {children}
     </ActiveSportContext.Provider>
   );
