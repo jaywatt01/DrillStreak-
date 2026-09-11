@@ -155,6 +155,20 @@ export async function removeFromRoster(membershipId: string): Promise<void> {
   if (error) throw error;
 }
 
+// The other side of removeFromRoster — a guardian/player choosing to
+// leave a team themselves, rather than a coach removing them. Same
+// underlying delete, same team_memberships_access RLS (already permits
+// either the coach or the player's own owner/guardian — added when the
+// table's RLS was first written, not a new grant), just a differently-
+// named entry point for the guardian side of that same permission.
+// Real ask, 2026-09-11: identified by team+player rather than membership
+// id, since the Account screen's roster overview only has team id/name
+// per player (list_teams_for_player), not membership rows.
+export async function leaveTeam(playerId: string, teamId: string): Promise<void> {
+  const { error } = await supabase.from('team_memberships').delete().eq('player_id', playerId).eq('team_id', teamId);
+  if (error) throw error;
+}
+
 // sport filters the shared default library to the team's own sport (a
 // basketball coach shouldn't see baseball's 30 defaults mixed in) — added
 // 2026-09-10 alongside the baseball/softball libraries. A coach's own

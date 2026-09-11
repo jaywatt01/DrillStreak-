@@ -85,7 +85,14 @@ export function formatFilterLabel(value: string): string {
 // Jay's real ask, 2026-09-11: flip which filter is primary for sports
 // where that actually helps, not a blanket change to the model
 // everywhere else. Per-sport, not global.
-const POSITION_FIRST_SPORTS = new Set(['soccer']);
+// Basketball/baseball deliberately excluded, even though Jay initially
+// asked for "all the sports that way": basketball has zero position data
+// on any drill (predates position_group entirely) and would collapse to
+// one useless "All Positions" bucket instead of its 3 real categories;
+// baseball's Hitting/Pitching are position-agnostic too. Volleyball added
+// 2026-09-11 alongside the ask — it genuinely supports the flip the same
+// way soccer does (5 positions covering nearly the whole library).
+const POSITION_FIRST_SPORTS = new Set(['soccer', 'volleyball']);
 
 export function isPositionFirstSport(sport: string): boolean {
   return POSITION_FIRST_SPORTS.has(sport);

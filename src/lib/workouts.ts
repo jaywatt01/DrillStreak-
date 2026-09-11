@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { DRILL_SELECT_COLUMNS, Drill, mapDrillRow } from './players';
+import { DRILL_SELECT_COLUMNS, Drill, mapDrillRow, matchesPrimaryDrillFilter } from './players';
 
 // Every category currently present across the default library + a
 // player's own custom drills, e.g. ["ballhandling", "conditioning",
@@ -44,15 +44,21 @@ export async function listAllDrills(playerId: string, sport: string): Promise<Dr
 // feedback on v1 (which listed 3 full drill rows up top): with a 10-20
 // player roster, spending that much vertical space above the actual roster
 // list recreates the scroll fatigue this whole feature exists to avoid.
-// Now a category produces one random drill on tap instead of pre-listing
+// Now a chip produces one random drill on tap instead of pre-listing
 // suggestions — same "give me something fast" intent, a fraction of the
-// footprint (one small chip per category instead of a full row each).
-// Re-tapping the same category re-rolls (no memory kept) rather than
-// showing the same pick twice in a row.
-export function pickRandomDrillFromCategory(allDrills: Drill[], category: string): Drill | null {
-  const inCategory = allDrills.filter((d) => d.category === category);
-  if (inCategory.length === 0) return null;
-  return inCategory[Math.floor(Math.random() * inCategory.length)];
+// footprint (one small chip per option instead of a full row each).
+// Re-tapping the same chip re-rolls (no memory kept) rather than showing
+// the same pick twice in a row.
+//
+// 2026-09-11: generalized from category-only to whichever field is
+// primary for the sport (matchesPrimaryDrillFilter, lib/players.ts) —
+// Quick Start now offers positions for volleyball/soccer, same as the
+// "What to work on today" picker below it, instead of staying
+// category-based while everything else on the screen flipped.
+export function pickRandomDrillFromPrimary(allDrills: Drill[], sport: string, primaryValue: string): Drill | null {
+  const matching = allDrills.filter((d) => matchesPrimaryDrillFilter(d, sport, primaryValue));
+  if (matching.length === 0) return null;
+  return matching[Math.floor(Math.random() * matching.length)];
 }
 
 export type WorkoutTemplate = {

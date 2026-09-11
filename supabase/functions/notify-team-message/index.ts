@@ -1,12 +1,15 @@
-// notify-team-message: fans a new team_messages or team_events row out to
-// the right devices via Expo's push API. NOT deployed by pushing this repo
-// — Supabase Edge Functions are their own deploy target. See DRILLSTREAK.md
-// for the manual steps: deploy this function (`supabase functions deploy
-// notify-team-message`, or paste it into the Dashboard's Edge Functions
-// editor), then wire a Database Webhook (Dashboard -> Database -> Webhooks)
-// on INSERT for both team_messages and team_events, pointed at this
-// function's URL. Also requires an Apple Push key in Jay's Apple Developer
-// account before iOS delivery actually works — see DRILLSTREAK.md.
+// notify-team-message: fans a new team_messages/team_events row, or a
+// team_memberships join/leave, out to the right devices via Expo's push
+// API. NOT deployed by pushing this repo — Supabase Edge Functions are
+// their own deploy target. See DRILLSTREAK.md for the manual steps:
+// redeploy this function (`supabase functions deploy notify-team-message`,
+// or paste it into the Dashboard's Edge Functions editor) — team_messages/
+// team_events already call it via pg_net triggers in schema.sql, and
+// team_memberships' own triggers (added 2026-09-11, notify_team_roster_
+// webhook) point at this exact same function URL, so no new Database
+// Webhook wiring is needed, just the redeploy. Also requires an Apple
+// Push key in Jay's Apple Developer account before iOS delivery actually
+// works — see DRILLSTREAK.md.
 //
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected into every
 // Edge Function's environment by Supabase — nothing to configure for
@@ -25,9 +28,13 @@ const supabase = createClient(
 );
 
 type WebhookPayload = {
-  type: 'INSERT';
-  table: 'team_messages' | 'team_events';
+  type: 'INSERT' | 'DELETE';
+  table: 'team_messages' | 'team_events' | 'team_memberships';
   record: Record<string, any>;
+  // Only set for team_memberships — that table carries no author/creator
+  // column on the row itself (nothing says who deleted a membership), so
+  // the SQL trigger captures auth.uid() explicitly and passes it here.
+  actor_user_id?: string | null;
 };
 
 // Every user connected to a team — the coach, plus every distinct guardian/
@@ -107,6 +114,38 @@ Deno.serve(async (req) => {
       teamId: event.team_id as string,
       view: 'calendar',
     });
+  }
+
+  // Coach notification on a real roster change, added 2026-09-11. Only
+  // ever notifies the coach — never the joining/leaving family, who
+  // already see their own action confirmed on-screen. Skipped entirely
+  // when the coach IS the actor (their own removeFromRoster tap doesn't
+  // need a push telling them what they just did) — the join direction
+  // never hits this in practice today, since a player only ever joins via
+  // their own invite-code redemption, but the check is symmetric on
+  // purpose rather than assuming that stays true forever.
+  if (payload.table === 'team_memberships') {
+    const membership = payload.record;
+    const { data: team } = await supabase
+      .from('teams')
+      .select('coach_user_id, name')
+      .eq('id', membership.team_id)
+      .single();
+    if (team?.coach_user_id && team.coach_user_id !== payload.actor_user_id) {
+      const { data: player } = await supabase
+        .from('players')
+        .select('display_name')
+        .eq('id', membership.player_id)
+        .single();
+      const name = (player?.display_name as string | undefined) ?? 'A player';
+      const tokens = await getPushTokens([team.coach_user_id as string]);
+      const title = payload.type === 'INSERT' ? 'New roster addition' : 'Roster update';
+      const verb = payload.type === 'INSERT' ? 'joined' : 'left';
+      await sendExpoPush(tokens, title, `${name} ${verb} ${team.name as string}.`, {
+        teamId: membership.team_id as string,
+        view: 'messages',
+      });
+    }
   }
 
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });

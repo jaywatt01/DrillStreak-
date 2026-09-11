@@ -12,12 +12,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../theme/colors';
 import { getMyDisplayName, setMyDisplayName } from '../lib/profile';
 import { listMyTeams, listTeamContacts } from '../lib/teamMessages';
-import { getPlayerTeams } from '../lib/team';
-import { AVAILABLE_SPORTS, listMyPlayers, Player } from '../lib/players';
+import { getPlayerTeams, leaveTeam } from '../lib/team';
+import { AVAILABLE_SPORTS, deletePlayer, listMyPlayers, Player } from '../lib/players';
 import { listBadges, Badge, filterCurrentBadges } from '../lib/badges';
 import { getActiveSeason } from '../lib/seasons';
 import BadgeLegend from '../components/BadgeLegend';
@@ -33,6 +34,7 @@ import { useActiveSport } from '../lib/ActiveSportContext';
 import SportSwitcher from '../components/SportSwitcher';
 
 export default function AccountScreen() {
+  const navigation = useNavigation();
   const { sport: activeSport, loading: sportLoading } = useActiveSport();
   const [email, setEmail] = useState<string | null>(null);
   // Deliberately the raw RevenueCat signal only — NOT combined with
@@ -69,8 +71,12 @@ export default function AccountScreen() {
   // off, per Jay's own call — this is just "who, what sport, what team,"
   // nothing that needs a season or a streak number attached.
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
-  const [teamNamesByPlayer, setTeamNamesByPlayer] = useState<Record<string, string[]>>({});
+  const [teamsByPlayer, setTeamsByPlayer] = useState<Record<string, { id: string; name: string }[]>>({});
   const [loadingAllPlayers, setLoadingAllPlayers] = useState(true);
+  // Coach/Parent/Program cards collapsed behind one tap by default
+  // (2026-09-11, Jay's ask) — frees up room on the screen for the new
+  // player roster and the existing badge section above it.
+  const [billingExpanded, setBillingExpanded] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
@@ -80,26 +86,34 @@ export default function AccountScreen() {
     listMyInstitutionalTeams()
       .then(setInstitutionalTeams)
       .catch(() => setInstitutionalTeams([]));
-    listMyPlayers()
-      .then(async (all) => {
-        setAllPlayers(all);
-        // Per-player try/catch — one player's team lookup failing (a rare
-        // RLS/network hiccup) shouldn't blank out every other player's
-        // team name too; that player just shows no team line instead.
-        const entries = await Promise.all(
-          all.map(async (p) => {
-            try {
-              const teams = await getPlayerTeams(p.id);
-              return [p.id, teams.map((t) => t.name)] as const;
-            } catch {
-              return [p.id, []] as const;
-            }
-          })
-        );
-        setTeamNamesByPlayer(Object.fromEntries(entries));
-      })
-      .finally(() => setLoadingAllPlayers(false));
+    loadAllPlayers();
   }, []);
+
+  // Factored out so the roster actions below (leave team, delete) can
+  // re-sync this section after a real change instead of hand-mutating
+  // local state and risking it drifting from the server.
+  async function loadAllPlayers() {
+    setLoadingAllPlayers(true);
+    try {
+      const all = await listMyPlayers();
+      setAllPlayers(all);
+      // Per-player try/catch — one player's team lookup failing (a rare
+      // RLS/network hiccup) shouldn't blank out every other player's
+      // team info too; that player just shows no team line instead.
+      const entries = await Promise.all(
+        all.map(async (p) => {
+          try {
+            return [p.id, await getPlayerTeams(p.id)] as const;
+          } catch {
+            return [p.id, []] as const;
+          }
+        })
+      );
+      setTeamsByPlayer(Object.fromEntries(entries));
+    } finally {
+      setLoadingAllPlayers(false);
+    }
+  }
 
   // Separate effect, depends on activeSport/sportLoading (2026-09-10) —
   // the badge roster is the one thing on this screen that's actually
@@ -122,6 +136,95 @@ export default function AccountScreen() {
       })
       .finally(() => setLoadingBadges(false));
   }, [activeSport, sportLoading]);
+
+  // Real ask, 2026-09-11: the new "Your Players" cards should be
+  // long-press-able the same way MyTeamScreen's roster rows already are.
+  // "Remove from Team" reuses the same team_memberships_access RLS the
+  // coach's own removeFromRoster already relies on (see leaveTeam's
+  // comment in lib/team.ts) — this is the guardian/player side of that
+  // same permission, not a new capability.
+  const handleLongPressAllPlayer = (player: Player) => {
+    const teams = teamsByPlayer[player.id] ?? [];
+    const options: { text: string; style?: 'destructive' | 'cancel'; onPress?: () => void }[] = [
+      {
+        text: 'Edit Profile',
+        onPress: () =>
+          (navigation.navigate as (name: never, params?: object) => void)('Add a Player' as never, {
+            editPlayerId: player.id,
+          }),
+      },
+    ];
+    if (teams.length > 0) {
+      options.push({
+        text: 'Remove from Team',
+        style: 'destructive',
+        onPress: () => confirmRemoveFromTeam(player, teams),
+      });
+    }
+    options.push({
+      text: 'Delete',
+      style: 'destructive',
+      onPress: () => confirmDeletePlayer(player),
+    });
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(player.display_name, 'What would you like to do?', options);
+  };
+
+  const confirmRemoveFromTeam = (player: Player, teams: { id: string; name: string }[]) => {
+    const doRemove = (teamId: string, teamName: string) => {
+      Alert.alert(
+        `Remove ${player.display_name} from ${teamName}?`,
+        "They'll lose access to this team's assignments and Team Chat. A new invite code would be needed to rejoin.",
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await leaveTeam(player.id, teamId);
+                await loadAllPlayers();
+              } catch (e) {
+                Alert.alert('Could not remove from team', e instanceof Error ? e.message : 'Something went wrong.');
+              }
+            },
+          },
+        ]
+      );
+    };
+    // A player is normally on 0 or 1 team for a given sport — the rare
+    // multi-team case gets a second picker instead of guessing which one.
+    if (teams.length === 1) {
+      doRemove(teams[0].id, teams[0].name);
+    } else {
+      Alert.alert(`Remove ${player.display_name} from which team?`, undefined, [
+        ...teams.map((t) => ({ text: t.name, onPress: () => doRemove(t.id, t.name) })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ]);
+    }
+  };
+
+  const confirmDeletePlayer = (player: Player) => {
+    Alert.alert(
+      `Delete ${player.display_name}?`,
+      "This removes their profile and all their logged history. This can't be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deletePlayer(player.id);
+              await loadAllPlayers();
+            } catch (e) {
+              Alert.alert('Could not delete', e instanceof Error ? e.message : 'Something went wrong.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // Soft check, not a hard gate: a display_name is one value per account,
   // shared across every team that account is on, so a strict app-wide
@@ -245,23 +348,28 @@ export default function AccountScreen() {
         <View style={styles.badgesSection}>
           <Text style={styles.tierLabel}>Your Players</Text>
           <Text style={styles.tierBody}>
-            Every player linked to your account, across every sport you're using.
+            Every player linked to your account, across every sport you're using. Long-press a
+            player for options.
           </Text>
           {loadingAllPlayers ? (
             <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
           ) : (
             allPlayers.map((p) => (
-              <View key={p.id} style={styles.badgeRosterRow}>
+              <Pressable
+                key={p.id}
+                style={styles.badgeRosterRow}
+                onLongPress={() => handleLongPressAllPlayer(p)}
+              >
                 <View style={styles.badgeRosterTopRow}>
                   <Text style={styles.badgeRosterName}>{p.display_name}</Text>
                   <Text style={styles.sportTag}>
                     {AVAILABLE_SPORTS.find((s) => s.value === p.sport)?.label ?? p.sport}
                   </Text>
                 </View>
-                {teamNamesByPlayer[p.id]?.length ? (
-                  <Text style={styles.rosterTeamName}>{teamNamesByPlayer[p.id].join(', ')}</Text>
+                {teamsByPlayer[p.id]?.length ? (
+                  <Text style={styles.rosterTeamName}>{teamsByPlayer[p.id].map((t) => t.name).join(', ')}</Text>
                 ) : null}
-              </View>
+              </Pressable>
             ))
           )}
         </View>
@@ -329,6 +437,13 @@ export default function AccountScreen() {
         </View>
       </Modal>
 
+      <Pressable style={styles.billingToggle} onPress={() => setBillingExpanded((v) => !v)}>
+        <Text style={styles.billingToggleText}>💳 Billing & Memberships</Text>
+        <Text style={styles.billingToggleChevron}>{billingExpanded ? '▲' : '▼'}</Text>
+      </Pressable>
+
+      {billingExpanded ? (
+        <>
       <View style={styles.tierCard}>
         <Text style={styles.tierLabel}>Coach</Text>
         <Text style={styles.tierValue}>Free — always included</Text>
@@ -428,6 +543,8 @@ export default function AccountScreen() {
           </Text>
         </View>
       ))}
+        </>
+      ) : null}
 
       <Pressable style={styles.signOutButton} onPress={() => supabase.auth.signOut()}>
         <Text style={styles.signOutText}>Sign out</Text>
@@ -502,6 +619,19 @@ const styles = StyleSheet.create({
   },
   badgeRosterLink: { fontSize: 13, fontWeight: '600', color: colors.accentDark },
   rosterTeamName: { fontSize: 12, color: colors.textMuted },
+  billingToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: colors.surface,
+  },
+  billingToggleText: { fontSize: 15, fontWeight: '600', color: colors.text },
+  billingToggleChevron: { fontSize: 13, color: colors.textMuted },
   badgeModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
