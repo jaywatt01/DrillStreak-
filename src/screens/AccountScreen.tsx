@@ -23,6 +23,7 @@ import { listBadges, Badge, filterCurrentBadges } from '../lib/badges';
 import { getActiveSeason } from '../lib/seasons';
 import BadgeLegend from '../components/BadgeLegend';
 import BadgeIconStrip from '../components/BadgeIconStrip';
+import ActionSheet, { ActionSheetOption } from '../components/ActionSheet';
 import {
   isPurchasesConfigured,
   purchaseParentTier,
@@ -143,9 +144,27 @@ export default function AccountScreen() {
   // coach's own removeFromRoster already relies on (see leaveTeam's
   // comment in lib/team.ts) — this is the guardian/player side of that
   // same permission, not a new capability.
-  const handleLongPressAllPlayer = (player: Player) => {
+  //
+  // Real bug caught on-device, Android only, same day: this menu can
+  // have 4 options (Edit Profile/Remove from Team/Delete/Cancel) once a
+  // player is on a team — Alert.alert silently drops the 4th button on
+  // Android, leaving no way to dismiss except completing Edit or Delete.
+  // Routed through the new ActionSheet component instead (see its own
+  // comment) rather than Alert.alert.
+  const [actionSheetFor, setActionSheetFor] = useState<Player | null>(null);
+  // Rare multi-team case (a player is normally on 0 or 1 team for a
+  // given sport) — its own ActionSheet rather than guessing which team,
+  // same reasoning as the main menu: an unbounded list of team names is
+  // exactly the shape that broke on Android as a native Alert too.
+  const [teamPickerFor, setTeamPickerFor] = useState<{ player: Player; teams: { id: string; name: string }[] } | null>(
+    null
+  );
+
+  const handleLongPressAllPlayer = (player: Player) => setActionSheetFor(player);
+
+  const actionSheetOptions = (player: Player): ActionSheetOption[] => {
     const teams = teamsByPlayer[player.id] ?? [];
-    const options: { text: string; style?: 'destructive' | 'cancel'; onPress?: () => void }[] = [
+    const options: ActionSheetOption[] = [
       {
         text: 'Edit Profile',
         onPress: () =>
@@ -158,50 +177,38 @@ export default function AccountScreen() {
       options.push({
         text: 'Remove from Team',
         style: 'destructive',
-        onPress: () => confirmRemoveFromTeam(player, teams),
+        onPress: () =>
+          teams.length === 1 ? confirmRemoveFromTeam(player, teams[0].id, teams[0].name) : setTeamPickerFor({ player, teams }),
       });
     }
-    options.push({
-      text: 'Delete',
-      style: 'destructive',
-      onPress: () => confirmDeletePlayer(player),
-    });
+    options.push({ text: 'Delete', style: 'destructive', onPress: () => confirmDeletePlayer(player) });
     options.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(player.display_name, 'What would you like to do?', options);
+    return options;
   };
 
-  const confirmRemoveFromTeam = (player: Player, teams: { id: string; name: string }[]) => {
-    const doRemove = (teamId: string, teamName: string) => {
-      Alert.alert(
-        `Remove ${player.display_name} from ${teamName}?`,
-        "They'll lose access to this team's assignments and Team Chat. A new invite code would be needed to rejoin.",
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Remove',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await leaveTeam(player.id, teamId);
-                await loadAllPlayers();
-              } catch (e) {
-                Alert.alert('Could not remove from team', e instanceof Error ? e.message : 'Something went wrong.');
-              }
-            },
+  // Plain 2-button Alert.alert confirms — safe on both platforms (the
+  // Android button-count bug only bites at 4+), so no need to route
+  // these through the custom ActionSheet too.
+  const confirmRemoveFromTeam = (player: Player, teamId: string, teamName: string) => {
+    Alert.alert(
+      `Remove ${player.display_name} from ${teamName}?`,
+      "They'll lose access to this team's assignments and Team Chat. A new invite code would be needed to rejoin.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await leaveTeam(player.id, teamId);
+              await loadAllPlayers();
+            } catch (e) {
+              Alert.alert('Could not remove from team', e instanceof Error ? e.message : 'Something went wrong.');
+            }
           },
-        ]
-      );
-    };
-    // A player is normally on 0 or 1 team for a given sport — the rare
-    // multi-team case gets a second picker instead of guessing which one.
-    if (teams.length === 1) {
-      doRemove(teams[0].id, teams[0].name);
-    } else {
-      Alert.alert(`Remove ${player.display_name} from which team?`, undefined, [
-        ...teams.map((t) => ({ text: t.name, onPress: () => doRemove(t.id, t.name) })),
-        { text: 'Cancel', style: 'cancel' as const },
-      ]);
-    }
+        },
+      ]
+    );
   };
 
   const confirmDeletePlayer = (player: Player) => {
@@ -382,6 +389,30 @@ export default function AccountScreen() {
           )}
         </View>
       ) : null}
+
+      <ActionSheet
+        visible={actionSheetFor != null}
+        title={actionSheetFor?.display_name ?? ''}
+        message="What would you like to do?"
+        options={actionSheetFor ? actionSheetOptions(actionSheetFor) : []}
+        onClose={() => setActionSheetFor(null)}
+      />
+      <ActionSheet
+        visible={teamPickerFor != null}
+        title={teamPickerFor ? `Remove ${teamPickerFor.player.display_name} from which team?` : ''}
+        options={
+          teamPickerFor
+            ? [
+                ...teamPickerFor.teams.map((t) => ({
+                  text: t.name,
+                  onPress: () => confirmRemoveFromTeam(teamPickerFor.player, t.id, t.name),
+                })),
+                { text: 'Cancel', style: 'cancel' as const },
+              ]
+            : []
+        }
+        onClose={() => setTeamPickerFor(null)}
+      />
 
       {players.length > 0 ? (
         <View style={styles.badgesSection}>

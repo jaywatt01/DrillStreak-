@@ -33,6 +33,44 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'For Coaches',
+    items: [
+      {
+        q: 'How do I create a team?',
+        a: 'Go to the My Team tab and create one for whatever sport is currently active. You get a shareable invite code immediately.',
+      },
+      {
+        q: 'How do I assign drills?',
+        a: 'On My Team, tap "+ Assign," pick a category (or position), then a drill, then choose Whole Team or specific players.',
+      },
+      {
+        q: "How do I see who's actually done their drills?",
+        a: 'Roster Activity on My Team shows completions logged by anyone on the roster this week. Player-targeted assignments also show a "✓ Done" indicator once that specific player finishes.',
+      },
+    ],
+  },
+  {
+    title: 'Team Chat & Calendar',
+    items: [
+      {
+        q: "What's Team Chat?",
+        a: "A team-wide feed plus private messages — with your coach if you're a parent/player, or with any family if you're the coach. Switch between the team feed and a specific conversation using the chips at the top.",
+      },
+      {
+        q: 'Can a coach post announcements?',
+        a: 'Yes — long-press any team-wide message and pin it. Pinned messages show at the top of the feed.',
+      },
+      {
+        q: 'How do team events (games, practices) get on my calendar?',
+        a: 'On Team Chat, switch to the Calendar view. Coaches can add an event with a date, time, and location; anyone on the roster can tap "Add to my calendar" on any event to save it straight to their phone\'s own calendar app.',
+      },
+      {
+        q: 'Can I add a specific drill to my calendar too?',
+        a: "Yes — tap the 📅 icon on any drill on the Drills tab to schedule it with your own time and duration. If your coach set a suggested time for an assigned drill, that pre-fills the picker for you.",
+      },
+    ],
+  },
+  {
     title: 'Logging Drills',
     items: [
       {
@@ -84,36 +122,6 @@ const SECTIONS: Section[] = [
       {
         q: "What's offseason mode?",
         a: 'Swaps the daily streak for a weekly goal, and suggests a focus area based on your own real numbers from last season — not a generic tip.',
-      },
-    ],
-  },
-  {
-    title: 'For Coaches',
-    items: [
-      {
-        q: 'How do I create a team?',
-        a: 'Go to the My Team tab and create one for whatever sport is currently active. You get a shareable invite code immediately.',
-      },
-      {
-        q: 'How do I assign drills?',
-        a: 'On My Team, tap "+ Assign," pick a category (or position), then a drill, then choose Whole Team or specific players.',
-      },
-      {
-        q: "How do I see who's actually done their drills?",
-        a: 'Roster Activity on My Team shows completions logged by anyone on the roster this week. Player-targeted assignments also show a "✓ Done" indicator once that specific player finishes.',
-      },
-    ],
-  },
-  {
-    title: 'Team Chat',
-    items: [
-      {
-        q: "What's Team Chat?",
-        a: "A team-wide feed plus private messages — with your coach if you're a parent/player, or with any family if you're the coach. Switch between the team feed and a specific conversation using the chips at the top.",
-      },
-      {
-        q: 'Can a coach post announcements?',
-        a: 'Yes — long-press any team-wide message and pin it. Pinned messages show at the top of the feed.',
       },
     ],
   },

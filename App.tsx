@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
@@ -134,27 +135,34 @@ export default function App() {
     return () => subscription.remove();
   }, []);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
-
-  if (!session) {
-    return (
-      <>
-        <StatusBar style="dark" />
-        <AuthScreen />
-      </>
-    );
-  }
-
+  // Real bug Jay caught on-device, both platforms, 2026-09-11: the tab
+  // bar never reached the true bottom edge of the screen. Root cause —
+  // react-native-safe-area-context was installed (a dependency of
+  // @react-navigation/bottom-tabs) but SafeAreaProvider was never
+  // actually mounted anywhere. The tab bar internally reads safe-area
+  // insets to pad itself for the home indicator/gesture bar; with no
+  // provider, those insets silently resolve to zero, so the bar sat at a
+  // naive fixed height instead of extending into the real safe area.
+  // Wraps everything, not just the tab navigator — the loading spinner
+  // and AuthScreen sit inside it too, since insets should be available
+  // app-wide, not just once signed in.
   return (
-    <ActiveSportProvider>
-      <AppTabs />
-    </ActiveSportProvider>
+    <SafeAreaProvider>
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : !session ? (
+        <>
+          <StatusBar style="dark" />
+          <AuthScreen />
+        </>
+      ) : (
+        <ActiveSportProvider>
+          <AppTabs />
+        </ActiveSportProvider>
+      )}
+    </SafeAreaProvider>
   );
 }
 
