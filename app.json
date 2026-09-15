@@ -51,7 +51,8 @@
         "expo-media-library",
         {
           "photosPermission": "DrillStreak saves your recorded training clips to your Photos — it never keeps a copy itself.",
-          "savePhotosPermission": "DrillStreak saves your recorded training clips to your Photos — it never keeps a copy itself."
+          "savePhotosPermission": "DrillStreak saves your recorded training clips to your Photos — it never keeps a copy itself.",
+          "granularPermissions": []
         }
       ],
       "expo-video",
