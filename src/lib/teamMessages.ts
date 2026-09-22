@@ -63,7 +63,11 @@ export async function listTeamContacts(teamId: string): Promise<TeamContact[]> {
 export type TeamMessage = {
   id: string;
   teamId: string;
-  authorUserId: string;
+  // Nullable since the 2026-09-22 account-deletion migration: if the
+  // original sender deletes their account, this goes null (ON DELETE SET
+  // NULL) rather than the row disappearing, so the rest of the team keeps
+  // its message history. See schema.sql's 2026-09-22 migration comment.
+  authorUserId: string | null;
   recipientUserId: string | null; // null = team-wide, set = a private 1:1
   parentMessageId: string | null;
   body: string;
@@ -93,7 +97,7 @@ const TEAM_MESSAGE_COLUMNS =
 function mapMessageRow(row: {
   id: string;
   team_id: string;
-  author_user_id: string;
+  author_user_id: string | null;
   recipient_user_id: string | null;
   parent_message_id: string | null;
   body: string;

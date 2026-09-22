@@ -3821,3 +3821,76 @@ insert into drills (name, category, is_default, estimated_minutes) values
 --     player_stats_visible_to_team(badges.player_id)
 --     and is_teammate_of(badges.player_id, auth.uid())
 --   );
+
+-- ---------------------------------------------------------------------------
+-- Migration for the already-deployed database (2026-09-22): real account
+-- deletion, forced by Apple's guideline 5.1.1(v) rejection. Every FK to
+-- auth.users(id) except push_tokens/profiles had no ON DELETE action at all
+-- (confirmed live via pg_constraint before writing this, not assumed) --
+-- meaning a plain auth.admin.deleteUser() call would fail outright with a
+-- foreign-key violation for any account that ever created a team, a player,
+-- or sent a message. CASCADE = this row is that account's own private data,
+-- it dies with them. SET NULL = this row is shared with other people, it
+-- survives, anonymized.
+--
+-- team_messages.recipient_user_id is deliberately CASCADE, not SET NULL:
+-- team_messages_select's own policy uses "recipient_user_id is null" as the
+-- literal signal for "this is a public team-wide message, show it to
+-- everyone on the team." Nulling it on a deleted recipient would flip a
+-- private DM into visible-to-the-whole-team -- a real privacy leak caught by
+-- reading the policy before writing this, not after. CASCADE instead
+-- deletes just that one DM row; team-wide messages are never touched, since
+-- they never carried a real (non-null) recipient value for any FK action to
+-- fire on.
+--
+-- CONFIRMED APPLIED AND VERIFIED LIVE: every constraint re-queried via
+-- pg_constraint after applying shows the intended delete_rule, and a full
+-- forced-scenario test (two temp accounts, a team, a roster player, a
+-- coach's private note, a custom drill with a logged completion, a
+-- team-wide message, and a private DM -- run inside begin/rollback so
+-- nothing touched real data) confirmed: deleting the coach's account
+-- removed the team, its membership, the private note, and the team-wide
+-- message; left the custom drill in place with a null owner and its
+-- completion history fully intact; left the parent's own player row
+-- completely untouched; and deleted the private DM outright rather than
+-- exposing it to the team.
+-- ---------------------------------------------------------------------------
+-- alter table players
+--   drop constraint players_created_by_user_id_fkey,
+--   add constraint players_created_by_user_id_fkey
+--     foreign key (created_by_user_id) references auth.users(id) on delete cascade;
+--
+-- alter table guardianships
+--   drop constraint guardianships_guardian_user_id_fkey,
+--   add constraint guardianships_guardian_user_id_fkey
+--     foreign key (guardian_user_id) references auth.users(id) on delete cascade;
+--
+-- alter table teams
+--   drop constraint teams_coach_user_id_fkey,
+--   add constraint teams_coach_user_id_fkey
+--     foreign key (coach_user_id) references auth.users(id) on delete cascade;
+--
+-- alter table player_notes
+--   drop constraint player_notes_coach_user_id_fkey,
+--   add constraint player_notes_coach_user_id_fkey
+--     foreign key (coach_user_id) references auth.users(id) on delete cascade;
+--
+-- alter table drills
+--   drop constraint drills_created_by_user_id_fkey,
+--   add constraint drills_created_by_user_id_fkey
+--     foreign key (created_by_user_id) references auth.users(id) on delete set null;
+--
+-- alter table team_messages
+--   alter column author_user_id drop not null,
+--   drop constraint team_messages_author_user_id_fkey,
+--   add constraint team_messages_author_user_id_fkey
+--     foreign key (author_user_id) references auth.users(id) on delete set null,
+--   drop constraint team_messages_recipient_user_id_fkey,
+--   add constraint team_messages_recipient_user_id_fkey
+--     foreign key (recipient_user_id) references auth.users(id) on delete cascade;
+--
+-- alter table team_events
+--   alter column created_by_user_id drop not null,
+--   drop constraint team_events_created_by_user_id_fkey,
+--   add constraint team_events_created_by_user_id_fkey
+--     foreign key (created_by_user_id) references auth.users(id) on delete set null;

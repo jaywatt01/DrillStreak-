@@ -34,6 +34,7 @@ import {
 import { listMyInstitutionalTeams, InstitutionalTeam } from '../lib/institutionalAccess';
 import { useActiveSport } from '../lib/ActiveSportContext';
 import SportSwitcher from '../components/SportSwitcher';
+import { deleteMyAccount } from '../lib/account';
 
 export default function AccountScreen() {
   const navigation = useNavigation();
@@ -87,6 +88,7 @@ export default function AccountScreen() {
   // ActiveSportContext's switcherOpen uses, which has two real trigger
   // points (the on-screen link and a tab long-press).
   const [helpOpen, setHelpOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
@@ -235,6 +237,37 @@ export default function AccountScreen() {
               await loadAllPlayers();
             } catch (e) {
               Alert.alert('Could not delete', e instanceof Error ? e.message : 'Something went wrong.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Real in-app account deletion, added 2026-09-22 for Apple's guideline
+  // 5.1.1(v) rejection — account creation existed with no in-app deletion
+  // path at all before this. Same confirm-then-destructive-action pattern
+  // as confirmDeletePlayer above. On success, sign out locally so the app
+  // returns to AuthScreen — that return-to-signed-out state IS the
+  // "confirmation" step of the flow Apple's rejection asked to see
+  // recorded, not a separate screen of its own.
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      'Delete your account?',
+      "This permanently deletes your account, any team you coach, and everything tied to them — teammates keep their own accounts and their own logged history. This can't be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingAccount(true);
+            try {
+              await deleteMyAccount();
+              await supabase.auth.signOut();
+            } catch (e) {
+              setDeletingAccount(false);
+              Alert.alert('Could not delete account', e instanceof Error ? e.message : 'Something went wrong.');
             }
           },
         },
@@ -595,6 +628,18 @@ export default function AccountScreen() {
       <Pressable style={styles.signOutButton} onPress={() => supabase.auth.signOut()}>
         <Text style={styles.signOutText}>Sign out</Text>
       </Pressable>
+
+      <Pressable
+        style={styles.deleteAccountButton}
+        onPress={confirmDeleteAccount}
+        disabled={deletingAccount}
+      >
+        {deletingAccount ? (
+          <ActivityIndicator color="#C4362B" />
+        ) : (
+          <Text style={styles.deleteAccountText}>Delete Account</Text>
+        )}
+      </Pressable>
     </ScrollView>
   );
 }
@@ -729,4 +774,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   signOutText: { color: '#C4362B', fontSize: 15, fontWeight: '600' },
+  deleteAccountButton: {
+    marginTop: 4,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  deleteAccountText: { color: colors.textMuted, fontSize: 13, textDecorationLine: 'underline' },
 });

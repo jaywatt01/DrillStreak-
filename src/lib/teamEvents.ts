@@ -36,7 +36,10 @@ export type TeamEvent = {
   eventTime: string | null; // "HH:MM:SS"
   location: string | null;
   notes: string | null;
-  createdByUserId: string;
+  // Nullable since the 2026-09-22 account-deletion migration (ON DELETE SET
+  // NULL) — never displayed today, so this is defensive typing, not a UI
+  // change. See schema.sql's 2026-09-22 migration comment.
+  createdByUserId: string | null;
 };
 
 const TEAM_EVENT_COLUMNS =
@@ -51,7 +54,7 @@ function mapEventRow(row: {
   event_time: string | null;
   location: string | null;
   notes: string | null;
-  created_by_user_id: string;
+  created_by_user_id: string | null;
 }): TeamEvent {
   return {
     id: row.id,
