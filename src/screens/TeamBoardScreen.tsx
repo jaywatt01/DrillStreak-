@@ -277,7 +277,8 @@ export default function TeamBoardScreen() {
   // picker list) — check self first, then fall back to it. A message from
   // someone since removed from the roster (rare) falls back to a generic
   // label rather than showing nothing.
-  const authorLabel = (userId: string): string => {
+  const authorLabel = (userId: string | null): string => {
+    if (userId === null) return 'Team member';
     if (userId === myUserId) return 'You';
     return contacts.find((c) => c.userId === userId)?.label ?? 'Team member';
   };
