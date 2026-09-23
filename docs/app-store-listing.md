@@ -45,6 +45,12 @@ FREE VS. PARENT MEMBERSHIP
 
 Coach features are free permanently — they always will be.
 
+Terms of Use (EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+Terms of Service: https://legal.drillstreak.com/legal/terms-of-service.html
+Privacy Policy: https://legal.drillstreak.com/legal/privacy-policy.html
+
+**Required, not optional — added Sep 23, 2026 after a real rejection (guideline 3.1.2).** Any app selling an auto-renewable subscription must show a working Terms of Use (EULA) link on its App Store product page. Apple's automated review blocked the Sep 22 resubmission on exactly this. Keep these three lines at the very end of the Description whenever it's edited — they're the only place on the product page a Terms link can live (see the corrected Terms of Service section below).
+
 **Real correction, Sep 10, 2026 — this section previously carried the exact framing Jay had already rejected once (Aug 2, 2026, and again on `/for-schools`, Aug 30): "real accountability instead of a self-reported 'yeah I did it,'" "the exact problem of not knowing what actually happened at home," "verified, dated record instead of a guess," "no more guessing whether the extra work is really getting done."** That's surveillance/oversight framing, not the growth/confidence feeling this app is actually built to give a player. This repo's own `DRILLSTREAK.md` (Aug 2 entry, and the standing voice rule near the sport-switcher work) already documents this exact correction — should have been checked there before this section was ever written this way the first time, not caught by Jay after the fact a third time. Rewritten above; if this section gets touched again, check it against `DRILLSTREAK.md`'s voice rule and the live marketing site's actual copy first.
 
 **Note on the credibility line above (added August 14, 2026):** kept deliberately un-named. The specific coach (Chris Hines, Minnesota Timberwolves) gave this feedback as a personal friend on a private call, not as a public endorsement — using his name in App Store copy without asking him first would be a real overstep, both as a courtesy and because his name carries an implied team/league affiliation he hasn't agreed to lend. Ask him directly before ever naming him here; the generic phrasing above is the safe version to ship in the meantime.
@@ -63,8 +69,10 @@ https://legal.drillstreak.com/support.html (lists support@drillstreak.com as the
 ## Privacy Policy URL
 https://legal.drillstreak.com/legal/privacy-policy.html
 
-## Terms of Service URL (App Store Connect calls this the EULA field, optional but recommended)
+## Terms of Service
 https://legal.drillstreak.com/legal/terms-of-service.html
+
+**Corrected Sep 23, 2026 — the old heading here was wrong and caused a real rejection.** It said App Store Connect "calls this the EULA field, optional but recommended." Neither part was true: App Store Connect has no Terms of Service URL field at all (its License Agreement / EULA field takes pasted license *text*, not a link), and for a subscription app a functional Terms of Use link on the product page is required. Because of that note, this URL never reached the product page. The fix Apple accepts: the Terms of Use lines at the end of the Description above. Leave the License Agreement field on Apple's standard EULA unless a lawyer drafts a real custom one — our Terms of Service is written as terms, not as a software license, and swapping it in would drop the standard EULA's licensing protections.
 
 ---
 **Note (2026-07-26):** these are hosted from a separate small public repo, `jaywatt01/drillstreak-legal`, not the main app repo — `DrillStreak-` stayed private (GitHub Pages requires a public repo on the free plan, and making the actual app source public would have exposed the full RLS/paywall/business logic before launch). Keep the two repos' copies in sync — if the legal docs change here, copy the same edit to `jaywatt01/drillstreak-legal`.
